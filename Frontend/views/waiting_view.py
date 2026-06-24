@@ -1,5 +1,5 @@
 """
-waiting_view.py – Sala de espera mientras el host admite al usuario.
+waiting_view.py Sala de espera mientras el host admite al usuario.
 """
 
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QPushButton

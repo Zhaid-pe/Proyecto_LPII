@@ -1,17 +1,16 @@
 """
-room_view.py – Pantalla principal de la reunión.
-Paneles: Cámara | Chat | Archivos
+room_view.py  Pantalla principal de la reunion.
+Paneles: Camara | Chat (con archivos integrados)
 """
 
 import os
 import base64
-import threading
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QLineEdit, QTextEdit, QFrame,
-    QScrollArea, QListWidget, QListWidgetItem,
-    QFileDialog, QSplitter, QSizePolicy, QMessageBox
+    QListWidget, QListWidgetItem,
+    QFileDialog, QSplitter, QMessageBox
 )
 from PySide6.QtCore import Qt, Signal, QTimer, QByteArray
 from PySide6.QtGui import QFont, QPixmap, QImage
@@ -21,12 +20,11 @@ os.makedirs(DOWNLOADS_PATH, exist_ok=True)
 
 
 class RoomView(QWidget):
-    # Señales al controlador
-    send_chat = Signal(str)
-    send_file = Signal(str)          # filepath
-    leave_room = Signal()
-    admit_user = Signal(int)
-    reject_user = Signal(int)
+    send_chat    = Signal(str)
+    send_file    = Signal(str)
+    leave_room   = Signal()
+    admit_user   = Signal(int)
+    reject_user  = Signal(int)
     camera_toggle = Signal(bool)
 
     def __init__(self, parent=None):
@@ -35,7 +33,7 @@ class RoomView(QWidget):
         self.sala_info = {}
         self.usuario = {}
         self._camera_active = False
-        self._pending_requests: dict[int, str] = {}   # id_usuario -> nombre
+        self._pending_requests = {}
         self._build_ui()
 
     def setup(self, sala: dict, usuario: dict, es_host: bool):
@@ -44,11 +42,11 @@ class RoomView(QWidget):
         self.es_host = es_host
         nombre_sala = sala.get("nombre_sala", "Sala")
         codigo = sala.get("codigo_sala", "")
-        self.lbl_titulo.setText(f"🎥  {nombre_sala}")
-        self.lbl_codigo.setText(f"Código: {codigo}")
-        self._system_message(f"Conectado a «{nombre_sala}» · Código: {codigo}")
+        self.lbl_titulo.setText(f"Reunion: {nombre_sala}")
+        self.lbl_codigo.setText(f"Codigo: {codigo}")
+        self._system_message(f"Conectado a '{nombre_sala}' - Codigo: {codigo}")
         if es_host:
-            self._system_message("Eres el anfitrión. Los participantes verán una sala de espera.")
+            self._system_message("Eres el anfitrion. Los participantes veran una sala de espera.")
 
     # ── UI ──────────────────────────────────────────────────────────────────────
 
@@ -93,18 +91,14 @@ class RoomView(QWidget):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        # Topbar
         root.addWidget(self._build_topbar())
 
-        # Contenido
         splitter = QSplitter(Qt.Horizontal)
         splitter.setHandleWidth(4)
         splitter.setStyleSheet("QSplitter::handle { background: #2a2a40; }")
-
         splitter.addWidget(self._build_camera_panel())
         splitter.addWidget(self._build_chat_panel())
-        splitter.addWidget(self._build_files_panel())
-        splitter.setSizes([500, 300, 250])
+        splitter.setSizes([560, 440])
 
         root.addWidget(splitter)
 
@@ -115,14 +109,14 @@ class RoomView(QWidget):
         lay = QHBoxLayout(bar)
         lay.setContentsMargins(20, 0, 20, 0)
 
-        self.lbl_titulo = QLabel("🎥  Reunión")
+        self.lbl_titulo = QLabel("Reunion")
         self.lbl_titulo.setFont(QFont("Arial", 15, QFont.Bold))
         self.lbl_titulo.setStyleSheet("color:#2D8CFF;")
 
         self.lbl_codigo = QLabel("")
         self.lbl_codigo.setStyleSheet("color:#666; font-size:12px; margin-left:12px;")
 
-        btn_leave = QPushButton("Salir de la reunión")
+        btn_leave = QPushButton("Salir de la reunion")
         btn_leave.setObjectName("danger")
         btn_leave.setFixedHeight(34)
         btn_leave.clicked.connect(self._on_leave)
@@ -133,7 +127,7 @@ class RoomView(QWidget):
         lay.addWidget(btn_leave)
         return bar
 
-    # ── Panel Cámara ────────────────────────────────────────────────────────────
+    # ── Panel Camara ─────────────────────────────────────────────────────────────
 
     def _build_camera_panel(self) -> QFrame:
         panel = QFrame()
@@ -142,17 +136,15 @@ class RoomView(QWidget):
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(10)
 
-        # Área de video local
-        lbl_local = QLabel("TU CÁMARA")
+        lbl_local = QLabel("TU CAMARA")
         lbl_local.setStyleSheet("color:#555; font-size:10px; font-weight:bold;")
 
         self.lbl_cam_local = QLabel()
         self.lbl_cam_local.setFixedSize(320, 240)
         self.lbl_cam_local.setAlignment(Qt.AlignCenter)
         self.lbl_cam_local.setStyleSheet("background:#0d0d1a; border-radius:8px; color:#444; font-size:12px;")
-        self.lbl_cam_local.setText("Cámara desactivada")
+        self.lbl_cam_local.setText("Camara desactivada")
 
-        # Área de video remoto
         lbl_remote = QLabel("PARTICIPANTES")
         lbl_remote.setStyleSheet("color:#555; font-size:10px; font-weight:bold;")
 
@@ -160,17 +152,15 @@ class RoomView(QWidget):
         self.lbl_cam_remote.setMinimumSize(320, 240)
         self.lbl_cam_remote.setAlignment(Qt.AlignCenter)
         self.lbl_cam_remote.setStyleSheet("background:#0d0d1a; border-radius:8px; color:#444; font-size:12px;")
-        self.lbl_cam_remote.setText("Sin participantes con cámara activa")
+        self.lbl_cam_remote.setText("Sin participantes con camara activa")
 
-        # Controles
         ctrl = QHBoxLayout()
-        self.btn_camera = QPushButton("🎥  Iniciar cámara")
+        self.btn_camera = QPushButton("Iniciar camara")
         self.btn_camera.setObjectName("primary")
         self.btn_camera.setFixedHeight(36)
         self.btn_camera.clicked.connect(self._toggle_camera)
         ctrl.addWidget(self.btn_camera)
 
-        # Panel de solicitudes (solo host)
         self.frame_requests = QFrame()
         self.frame_requests.setStyleSheet("background:#161625; border-radius:8px;")
         req_layout = QVBoxLayout(self.frame_requests)
@@ -191,7 +181,6 @@ class RoomView(QWidget):
         layout.addWidget(self.frame_requests)
         layout.addStretch()
 
-        # Lista de participantes
         self.list_participants = QListWidget()
         self.list_participants.setMaximumHeight(120)
         self.list_participants.setStyleSheet("background:#0d0d1a; border-radius:6px; color:#aaa;")
@@ -200,7 +189,7 @@ class RoomView(QWidget):
 
         return panel
 
-    # ── Panel Chat ──────────────────────────────────────────────────────────────
+    # ── Panel Chat ───────────────────────────────────────────────────────────────
 
     def _build_chat_panel(self) -> QFrame:
         panel = QFrame()
@@ -209,7 +198,7 @@ class RoomView(QWidget):
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(8)
 
-        header = QLabel("💬  Chat")
+        header = QLabel("Chat")
         header.setFont(QFont("Arial", 13, QFont.Bold))
         layout.addWidget(header)
 
@@ -217,11 +206,48 @@ class RoomView(QWidget):
         self.chat_display.setReadOnly(True)
         layout.addWidget(self.chat_display)
 
+        # Acordeon de archivos
+        self.files_header = QPushButton("Archivos compartidos  v")
+        self.files_header.setCheckable(True)
+        self.files_header.setChecked(False)
+        self.files_header.setStyleSheet("""
+            QPushButton {
+                background: #1e1e36; border: 1px solid #2a2a50;
+                border-radius: 6px; color: #aaa; font-size: 12px;
+                padding: 5px 10px; text-align: left;
+            }
+            QPushButton:checked { color: #2D8CFF; border-color: #2D8CFF; }
+            QPushButton:hover { background: #25253a; }
+        """)
+        self.files_header.clicked.connect(self._toggle_files_list)
+        layout.addWidget(self.files_header)
+
+        self.list_files = QListWidget()
+        self.list_files.setMaximumHeight(110)
+        self.list_files.setVisible(False)
+        self.list_files.setStyleSheet(
+            "background:#0d0d1a; border:1px solid #2a2a40; border-radius:6px; color:#ccc; font-size:12px;"
+        )
+        layout.addWidget(self.list_files)
+
+        # Barra de entrada
         input_row = QHBoxLayout()
+        input_row.setSpacing(6)
+
         self.chat_input = QLineEdit()
-        self.chat_input.setPlaceholderText("Escribe un mensaje…")
+        self.chat_input.setPlaceholderText("Escribe un mensaje...")
         self.chat_input.setFixedHeight(38)
         self.chat_input.returnPressed.connect(self._on_send_chat)
+
+        btn_attach = QPushButton("@")
+        btn_attach.setToolTip("Compartir archivo")
+        btn_attach.setFixedSize(38, 38)
+        btn_attach.setStyleSheet("""
+            QPushButton { background: #232336; border: 1px solid #333;
+                          border-radius: 6px; font-size: 16px; color: #aaa; }
+            QPushButton:hover { background: #2D8CFF; color: white; border-color: #2D8CFF; }
+        """)
+        btn_attach.clicked.connect(self._on_share_file)
 
         btn_send = QPushButton("Enviar")
         btn_send.setObjectName("primary")
@@ -229,40 +255,24 @@ class RoomView(QWidget):
         btn_send.clicked.connect(self._on_send_chat)
 
         input_row.addWidget(self.chat_input)
+        input_row.addWidget(btn_attach)
         input_row.addWidget(btn_send)
         layout.addLayout(input_row)
 
         return panel
 
-    # ── Panel Archivos ──────────────────────────────────────────────────────────
+    def _toggle_files_list(self, checked: bool):
+        self.list_files.setVisible(checked)
+        count = self.list_files.count()
+        arrow = "^" if checked else "v"
+        label = f"Archivos compartidos ({count})  {arrow}" if count else f"Archivos compartidos  {arrow}"
+        self.files_header.setText(label)
 
-    def _build_files_panel(self) -> QFrame:
-        panel = QFrame()
-        panel.setObjectName("panel")
-        layout = QVBoxLayout(panel)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(10)
-
-        header = QLabel("📁  Archivos")
-        header.setFont(QFont("Arial", 13, QFont.Bold))
-        layout.addWidget(header)
-
-        self.list_files = QListWidget()
-        layout.addWidget(self.list_files)
-
-        btn_send_file = QPushButton("📤  Compartir archivo")
-        btn_send_file.setObjectName("primary")
-        btn_send_file.setFixedHeight(38)
-        btn_send_file.clicked.connect(self._on_share_file)
-        layout.addWidget(btn_send_file)
-
-        return panel
-
-    # ── Slots internos ──────────────────────────────────────────────────────────
+    # ── Slots internos ───────────────────────────────────────────────────────────
 
     def _on_leave(self):
         reply = QMessageBox.question(
-            self, "Salir", "¿Seguro que quieres salir de la reunión?",
+            self, "Salir", "Seguro que quieres salir de la reunion?",
             QMessageBox.Yes | QMessageBox.No
         )
         if reply == QMessageBox.Yes:
@@ -282,13 +292,18 @@ class RoomView(QWidget):
     def _toggle_camera(self):
         self._camera_active = not self._camera_active
         if self._camera_active:
-            self.btn_camera.setText("⏹  Detener cámara")
+            self.btn_camera.setText("Detener camara")
         else:
-            self.btn_camera.setText("🎥  Iniciar cámara")
-            self.lbl_cam_local.setText("Cámara desactivada")
+            self._reset_camera_ui()
         self.camera_toggle.emit(self._camera_active)
 
-    # ── API pública (llamada desde el controlador) ──────────────────────────────
+    def _reset_camera_ui(self):
+        self._camera_active = False
+        self.btn_camera.setText("Iniciar camara")
+        self.lbl_cam_local.setPixmap(QPixmap())
+        self.lbl_cam_local.setText("Camara desactivada")
+
+    # ── API publica ──────────────────────────────────────────────────────────────
 
     def append_chat(self, nombre: str, texto: str, es_propio: bool = False):
         color = "#2D8CFF" if es_propio else "#28a745"
@@ -301,11 +316,11 @@ class RoomView(QWidget):
 
     def _system_message(self, texto: str):
         self.chat_display.append(
-            f'<span style="color:#555;font-style:italic;">— {texto} —</span>'
+            f'<span style="color:#555;font-style:italic;">-- {texto} --</span>'
         )
 
     def add_participant(self, nombre: str):
-        self.list_participants.addItem(f"👤  {nombre}")
+        self.list_participants.addItem(f"  {nombre}")
 
     def remove_participant(self, nombre: str):
         for i in range(self.list_participants.count()):
@@ -314,17 +329,20 @@ class RoomView(QWidget):
                 break
 
     def add_file(self, nombre: str, remitente: str):
-        self.list_files.addItem(f"📄  {nombre}  (por {remitente})")
+        self.list_files.addItem(f"  {nombre}  (por {remitente})")
+        count = self.list_files.count()
+        checked = self.files_header.isChecked()
+        arrow = "^" if checked else "v"
+        self.files_header.setText(f"Archivos compartidos ({count})  {arrow}")
 
     def show_join_request(self, id_usuario: int, nombre: str):
-        """Muestra la solicitud de ingreso al host."""
         self._pending_requests[id_usuario] = nombre
         self.frame_requests.setVisible(True)
 
         item_widget = QWidget()
         row = QHBoxLayout(item_widget)
         row.setContentsMargins(4, 2, 4, 2)
-        lbl = QLabel(f"👤 {nombre}")
+        lbl = QLabel(f"{nombre}")
         lbl.setStyleSheet("color:#ddd;")
         btn_admit = QPushButton("Admitir")
         btn_admit.setObjectName("success")
@@ -364,7 +382,6 @@ class RoomView(QWidget):
         self.reject_user.emit(id_usuario)
 
     def show_camera_frame(self, frame_b64: str):
-        """Muestra un frame JPEG base64 en el panel remoto."""
         raw = base64.b64decode(frame_b64)
         img = QImage()
         img.loadFromData(QByteArray(raw), "JPG")
@@ -377,18 +394,31 @@ class RoomView(QWidget):
             )
             self.lbl_cam_remote.setPixmap(pixmap)
 
-    def show_local_frame(self, frame_b64: str):
-        raw = base64.b64decode(frame_b64)
-        img = QImage()
-        img.loadFromData(QByteArray(raw), "JPG")
-        if not img.isNull():
-            pixmap = QPixmap.fromImage(img).scaled(
-                self.lbl_cam_local.width(),
-                self.lbl_cam_local.height(),
-                Qt.KeepAspectRatio,
-                Qt.SmoothTransformation,
-            )
-            self.lbl_cam_local.setPixmap(pixmap)
+    def show_local_frame(self, frame_data):
+        from PySide6.QtGui import QImage, QPixmap
+        from PySide6.QtCore import Qt
+        import base64
+
+        try:
+            # Si la data llega como texto Base64, la decodificamos a bytes
+            if isinstance(frame_data, str):
+                frame_data = base64.b64decode(frame_data)
+
+            # Cargar imagen mágicamente desde los bytes
+            img = QImage()
+            img.loadFromData(frame_data)
+
+            if not img.isNull():
+                pixmap = QPixmap.fromImage(img).scaled(
+                    self.lbl_cam_local.width(),
+                    self.lbl_cam_local.height(),
+                    Qt.KeepAspectRatio,
+                    Qt.SmoothTransformation,
+                )
+                self.lbl_cam_local.setPixmap(pixmap)
+                
+        except Exception as e:
+            print(f"DEBUG [UI]: Error al mostrar imagen local: {e}")
 
     def load_history(self, mensajes: list):
         for m in mensajes:

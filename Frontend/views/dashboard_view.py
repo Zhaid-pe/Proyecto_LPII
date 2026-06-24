@@ -1,5 +1,5 @@
 """
-dashboard_view.py – Pantalla principal tras el login.
+dashboard_view.py Pantalla principal tras el login.
 Permite crear una sala o unirse a una por código.
 """
 
@@ -13,7 +13,7 @@ from PySide6.QtGui import QFont
 
 class DashboardView(QWidget):
     create_room_requested = Signal(str)   # nombre de sala
-    join_room_requested = Signal(str)     # código de sala
+    join_room_requested = Signal(str, str)    # ip, código de sala
     logout_requested = Signal()
 
     def __init__(self, parent=None):
@@ -149,9 +149,14 @@ class DashboardView(QWidget):
         title.setFont(QFont("Arial", 16, QFont.Bold))
         title.setAlignment(Qt.AlignCenter)
 
-        desc = QLabel("Ingresa el código de la reunión\nque te compartieron.")
+        desc = QLabel("Ingresa la IP del servidor y el\ncódigo de la reunión.")
         desc.setAlignment(Qt.AlignCenter)
         desc.setStyleSheet("color: #888; font-size: 12px;")
+
+        self.input_ip = QLineEdit()
+        self.input_ip.setPlaceholderText("IP del servidor (ej. 192.168.1.5)")
+        self.input_ip.setFixedHeight(40)
+        self.input_ip.setText("127.0.0.1")
 
         self.input_codigo = QLineEdit()
         self.input_codigo.setPlaceholderText("Código de sala (ej. AB12CD)")
@@ -167,7 +172,7 @@ class DashboardView(QWidget):
         """)
         btn.clicked.connect(self._on_join)
 
-        for w in (icon, title, desc, self.input_codigo, btn):
+        for w in (icon, title, desc, self.input_ip, self.input_codigo, btn):
             layout.addWidget(w)
         return card
 
@@ -178,6 +183,7 @@ class DashboardView(QWidget):
         self.create_room_requested.emit(nombre)
 
     def _on_join(self):
+        ip = self.input_ip.text().strip() or "127.0.0.1"
         codigo = self.input_codigo.text().strip().upper()
         if len(codigo) == 6:
-            self.join_room_requested.emit(codigo)
+            self.join_room_requested.emit(ip, codigo)

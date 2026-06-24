@@ -1,5 +1,5 @@
 """
-client_handler.py – Procesa el protocolo JSON por cliente.
+client_handler.py  Procesa el protocolo JSON por cliente.
 
 Mensajes soportados (tipo):
   LOGIN_REQUEST, REGISTER_REQUEST,
@@ -9,11 +9,16 @@ Mensajes soportados (tipo):
   CAMERA_FRAME, LEAVE_ROOM
 """
 
+import sys
 import os
 import json
 import base64
 import logging
 import threading
+
+_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
 
 from Backend import db_manager as db
 from Backend.socket_server import SocketServer

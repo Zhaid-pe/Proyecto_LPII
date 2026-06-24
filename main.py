@@ -1,8 +1,8 @@
 """
-main.py – Punto de entrada único del prototipo ZoomClone.
+main.py - Punto de entrada único del prototipo ZoomClone.
 
 Uso:
-    python main.py              → menú visual (recomendado)
+    python main.py             → menú visual (recomendado)
     python main.py server       → solo servidor (con ventana de control)
     python main.py client       → solo cliente
     python main.py both         → servidor + cliente en la misma PC
@@ -11,81 +11,156 @@ Uso:
 import sys
 import os
 import threading
-import time
+import socket
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Utilidad: obtener IPs locales de la máquina
+# ─────────────────────────────────────────────────────────────────────────────
+
+def get_local_ips() -> list[str]:
+    """
+    Devuelve una lista de IPs locales de la máquina (excluye 127.x.x.x).
+    Siempre incluye 127.0.0.1 al final como fallback.
+    """
+    ips = []
+    try:
+        # Método principal: conectar a un host externo para descubrir la IP saliente
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("8.8.8.8", 80))
+            ips.append(s.getsockname()[0])
+    except OSError:
+        pass
+
+    # Método secundario: getaddrinfo para capturar todas las interfaces
+    try:
+        hostname = socket.gethostname()
+        for info in socket.getaddrinfo(hostname, None, socket.AF_INET):
+            ip = info[4][0]
+            if ip not in ips and not ip.startswith("127."):
+                ips.append(ip)
+    except OSError:
+        pass
+
+    ips.append("127.0.0.1")
+    return ips
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Ventana de control del servidor
 # ─────────────────────────────────────────────────────────────────────────────
 
 class ServerWindow:
-    """
-    Ventana PySide6 que muestra el estado del servidor y permite detenerlo.
-    El servidor corre en un hilo daemon; esta ventana vive en el hilo principal.
-    """
-
-    def __init__(self, app, host="0.0.0.0", port=9090):
+    def __init__(self, host="0.0.0.0", port=9090):
         from PySide6.QtWidgets import (
             QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-            QLabel, QPushButton, QTextEdit, QFrame
+            QLabel, QPushButton, QTextEdit, QFrame, QApplication
         )
         from PySide6.QtCore import Qt, QTimer
-        from PySide6.QtGui import QFont, QTextCursor
+        from PySide6.QtGui import QFont
 
         self._server = None
         self._log_queue = __import__("queue").Queue()
+        self._port = port
 
-        # ── Parchear el logging para capturar mensajes ──────────────────────
         import logging
-
         class QueueHandler(logging.Handler):
             def __init__(self, q):
                 super().__init__()
                 self.q = q
             def emit(self, record):
                 self.q.put(self.format(record))
-
         logging.getLogger().addHandler(QueueHandler(self._log_queue))
 
-        # ── Ventana ─────────────────────────────────────────────────────────
         self.win = QMainWindow()
         self.win.setWindowTitle("ZoomClone – Servidor")
-        self.win.setFixedSize(520, 420)
-        self.win.setStyleSheet("QMainWindow, QWidget { background:#12121f; color:#e0e0e0; font-family:Arial; }")
+        self.win.setFixedSize(560, 500)
+        self.win.setStyleSheet(
+            "QMainWindow, QWidget { background:#12121f; color:#e0e0e0; font-family:Arial; }"
+        )
 
         central = QWidget()
         self.win.setCentralWidget(central)
         lay = QVBoxLayout(central)
         lay.setContentsMargins(24, 20, 24, 20)
-        lay.setSpacing(14)
+        lay.setSpacing(12)
 
-        # Título
+        # ── Título ──
         title = QLabel("🖥  Panel del Servidor")
         title.setFont(QFont("Arial", 18, QFont.Bold))
         title.setStyleSheet("color:#6f42c1;")
         title.setAlignment(Qt.AlignCenter)
         lay.addWidget(title)
 
-        # Estado
+        # ── Estado ──
         self.lbl_estado = QLabel("⏳  Iniciando servidor…")
         self.lbl_estado.setAlignment(Qt.AlignCenter)
         self.lbl_estado.setStyleSheet("font-size:13px; color:#aaa;")
         lay.addWidget(self.lbl_estado)
 
-        # Info de conexión
+        # ── Info host/puerto ──
         info_frame = QFrame()
-        info_frame.setStyleSheet("background:#1a1a2e; border-radius:8px; padding:4px;")
-        info_lay = QHBoxLayout(info_frame)
-        self.lbl_host = QLabel(f"Host: {host}   Puerto: {port}")
-        self.lbl_host.setStyleSheet("color:#888; font-size:12px;")
-        self.lbl_host.setAlignment(Qt.AlignCenter)
-        info_lay.addWidget(self.lbl_host)
+        info_frame.setStyleSheet(
+            "background:#1a1a2e; border-radius:8px; padding:4px;"
+        )
+        info_frame_lay = QHBoxLayout(info_frame)
+        lbl_host = QLabel(f"Escuchando en: {host}   Puerto: {port}")
+        lbl_host.setStyleSheet("color:#888; font-size:12px;")
+        lbl_host.setAlignment(Qt.AlignCenter)
+        info_frame_lay.addWidget(lbl_host)
         lay.addWidget(info_frame)
 
-        # Log
+        # ── IPs locales para compartir ──
+        ips_frame = QFrame()
+        ips_frame.setStyleSheet(
+            "background:#0d1a2e; border:1px solid #1a3a5c; border-radius:8px; padding:6px;"
+        )
+        ips_lay = QVBoxLayout(ips_frame)
+        ips_lay.setSpacing(6)
+
+        lbl_ip_title = QLabel("📡  IPs que pueden usar los clientes para conectarse:")
+        lbl_ip_title.setStyleSheet("color:#2D8CFF; font-size:12px; font-weight:bold;")
+        lbl_ip_title.setAlignment(Qt.AlignCenter)
+        ips_lay.addWidget(lbl_ip_title)
+
+        local_ips = get_local_ips()
+        for ip in local_ips:
+            row = QHBoxLayout()
+            icon = "🏠" if ip == "127.0.0.1" else "🌐"
+            note = "  (solo esta PC)" if ip == "127.0.0.1" else "  (red local — comparte esta)"
+            lbl_ip = QLabel(f"{icon}  {ip}{note}")
+            lbl_ip.setStyleSheet(
+                "color:#e0e0e0; font-size:13px; font-family:Consolas,monospace;"
+                if ip != "127.0.0.1"
+                else "color:#666; font-size:12px; font-family:Consolas,monospace;"
+            )
+            lbl_ip.setAlignment(Qt.AlignCenter)
+
+            btn_copy = QPushButton("Copiar")
+            btn_copy.setFixedSize(60, 24)
+            btn_copy.setStyleSheet("""
+                QPushButton {
+                    background:#1e3a5c; color:#88c0d0; border-radius:4px;
+                    font-size:11px; border:1px solid #2a5a8c;
+                }
+                QPushButton:hover { background:#2D8CFF; color:white; border-color:#2D8CFF; }
+            """)
+            _ip = ip  # captura para el lambda
+            btn_copy.clicked.connect(
+                lambda checked=False, i=_ip: QApplication.clipboard().setText(i)
+            )
+
+            row.addWidget(lbl_ip)
+            row.addWidget(btn_copy)
+            ips_lay.addLayout(row)
+
+        lay.addWidget(ips_frame)
+
+        # ── Log ──
         self.log_area = QTextEdit()
         self.log_area.setReadOnly(True)
         self.log_area.setStyleSheet(
@@ -94,7 +169,7 @@ class ServerWindow:
         )
         lay.addWidget(self.log_area)
 
-        # Botón detener
+        # ── Botón detener ──
         self.btn_stop = QPushButton("⏹  Detener servidor")
         self.btn_stop.setFixedHeight(42)
         self.btn_stop.setEnabled(False)
@@ -107,41 +182,37 @@ class ServerWindow:
         self.btn_stop.clicked.connect(self._stop)
         lay.addWidget(self.btn_stop)
 
-        # Timer para vaciar el log_queue → QTextEdit
         self._timer = QTimer()
         self._timer.timeout.connect(self._flush_log)
         self._timer.start(200)
 
-        # Arrancar el servidor en hilo daemon
-        self._thread = threading.Thread(target=self._run_server, args=(host, port), daemon=True)
+        self._thread = threading.Thread(
+            target=self._run_server, args=(host, port), daemon=True
+        )
         self._thread.start()
 
     def _run_server(self, host, port):
         from Backend import db_manager
         from Backend.socket_server import SocketServer
-
         db_manager.init_db()
         self._server = SocketServer(host, port)
-
-        # Señal a la GUI (thread-safe mediante la cola)
         self._log_queue.put("__READY__")
-        self._server.start()   # bloqueante hasta stop()
+        self._server.start()
 
     def _flush_log(self):
-        from PySide6.QtGui import QTextCursor
-        changed = False
         while not self._log_queue.empty():
             line = self._log_queue.get_nowait()
             if line == "__READY__":
                 self.lbl_estado.setText("✅  Servidor en línea — esperando conexiones")
-                self.lbl_estado.setStyleSheet("font-size:13px; color:#28a745; font-weight:bold;")
+                self.lbl_estado.setStyleSheet(
+                    "font-size:13px; color:#28a745; font-weight:bold;"
+                )
                 self.btn_stop.setEnabled(True)
                 self._append_log("Servidor iniciado correctamente.")
             else:
                 self._append_log(line)
-            changed = True
 
-    def _append_log(self, text: str):
+    def _append_log(self, text):
         from PySide6.QtGui import QTextCursor
         self.log_area.append(text)
         self.log_area.moveCursor(QTextCursor.End)
@@ -159,70 +230,27 @@ class ServerWindow:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Funciones de arranque
-# ─────────────────────────────────────────────────────────────────────────────
-
-def _make_app():
-    from PySide6.QtWidgets import QApplication
-    app = QApplication.instance() or QApplication(sys.argv)
-    app.setStyle("Fusion")
-    app.setApplicationName("ZoomClone")
-    return app
-
-
-def run_server_gui(host="0.0.0.0", port=9090):
-    """Servidor con ventana de control (no bloqueante en la GUI)."""
-    app = _make_app()
-    win = ServerWindow(app, host, port)
-    win.show()
-    sys.exit(app.exec())
-
-
-def run_client_gui(host="127.0.0.1", port=9090):
-    """Solo cliente."""
-    app = _make_app()
-    from Frontend.main_client import MainClient
-    win = MainClient(host=host, port=port)
-    win.show()
-    sys.exit(app.exec())
-
-
-def run_both_gui(host="127.0.0.1", port=9090):
-    """Servidor en hilo daemon + cliente en la misma QApplication."""
-    from Backend import db_manager
-    from Backend.socket_server import SocketServer
-
-    db_manager.init_db()
-    _srv = SocketServer("0.0.0.0", port)
-    t = threading.Thread(target=_srv.start, daemon=True, name="ZoomServer")
-    t.start()
-    time.sleep(0.6)   # esperar a que el socket esté listo
-
-    app = _make_app()
-    from Frontend.main_client import MainClient
-    win = MainClient(host=host, port=port)
-    win.show()
-    sys.exit(app.exec())
-
-
-# ─────────────────────────────────────────────────────────────────────────────
 # Selector visual
 # ─────────────────────────────────────────────────────────────────────────────
 
 def launch_selector():
     from PySide6.QtWidgets import (
-        QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton
+        QApplication, QWidget, QVBoxLayout, QHBoxLayout,
+        QLabel, QPushButton
     )
-    from PySide6.QtCore import Qt
+    from PySide6.QtCore import Qt, QTimer
     from PySide6.QtGui import QFont
 
-    app = _make_app()
+    app = QApplication(sys.argv)
+    app.setStyle("Fusion")
+    app.setApplicationName("ZoomClone")
+    app.setQuitOnLastWindowClosed(False)
 
-    dialog = QDialog()
-    dialog.setWindowTitle("ZoomClone – Inicio")
-    dialog.setFixedSize(440, 360)
-    dialog.setStyleSheet("""
-        QDialog  { background-color: #12121f; }
+    selector = QWidget()
+    selector.setWindowTitle("ZoomClone – Inicio")
+    selector.setFixedSize(440, 360)
+    selector.setStyleSheet("""
+        QWidget  { background-color: #12121f; color: #e0e0e0; font-family: Arial; }
         QLabel   { color: #e0e0e0; font-family: Arial; }
         QPushButton {
             background: #2D8CFF; color: white; border-radius: 8px;
@@ -235,7 +263,7 @@ def launch_selector():
         QPushButton#both_btn:hover { background: #218838; }
     """)
 
-    lay = QVBoxLayout(dialog)
+    lay = QVBoxLayout(selector)
     lay.setSpacing(20)
     lay.setContentsMargins(40, 30, 40, 30)
 
@@ -250,21 +278,10 @@ def launch_selector():
     sub.setStyleSheet("color: #888; font-size: 13px;")
     lay.addWidget(sub)
 
-    chosen = {"value": None}
-
-    def pick(m):
-        chosen["value"] = m
-        dialog.accept()
-
     row = QHBoxLayout()
-    btn_s = QPushButton("🖥  Servidor");  btn_s.setObjectName("server_btn")
+    btn_s = QPushButton("🖥  Servidor"); btn_s.setObjectName("server_btn")
     btn_c = QPushButton("💻  Cliente")
-    btn_b = QPushButton("🚀  Ambos");    btn_b.setObjectName("both_btn")
-
-    btn_s.clicked.connect(lambda: pick("server"))
-    btn_c.clicked.connect(lambda: pick("client"))
-    btn_b.clicked.connect(lambda: pick("both"))
-
+    btn_b = QPushButton("🚀  Ambos");   btn_b.setObjectName("both_btn")
     for b in (btn_s, btn_c, btn_b):
         b.setFixedHeight(48)
         row.addWidget(b)
@@ -279,35 +296,90 @@ def launch_selector():
     hint.setAlignment(Qt.AlignCenter)
     lay.addWidget(hint)
 
-    dialog.exec()
-
-    mode = chosen["value"]
-    if not mode:
-        sys.exit(0)
-
-    # Toda la lógica posterior reutiliza la misma QApplication
-    if mode == "server":
-        win = ServerWindow(app, host="0.0.0.0", port=9090)
+    def open_server():
+        selector.hide()
+        win = ServerWindow()
+        app._main_win = win
         win.show()
-        sys.exit(app.exec())
 
-    elif mode == "client":
+    def open_client():
+        selector.hide()
         from Frontend.main_client import MainClient
         win = MainClient(host="127.0.0.1", port=9090)
+        app._main_win = win
         win.show()
-        sys.exit(app.exec())
 
-    elif mode == "both":
-        from Backend import db_manager
-        from Backend.socket_server import SocketServer
-        db_manager.init_db()
-        srv = SocketServer("0.0.0.0", 9090)
-        threading.Thread(target=srv.start, daemon=True, name="ZoomServer").start()
-        time.sleep(0.6)
-        from Frontend.main_client import MainClient
+    def open_both():
+        selector.hide()
+        # 1. Creamos y mostramos la ventana del servidor inmediatamente
+        srv_win = ServerWindow()
+        app._srv_win = srv_win
+        srv_win.show()
+
+        # 2. Programamos de forma segura la inicialización del cliente en el hilo principal
+        def _open_client_now():
+            from Frontend.main_client import MainClient
+            client_win = MainClient(host="127.0.0.1", port=9090)
+            app._main_win = client_win
+            client_win.show()
+
+        # El temporizador se ejecuta nativamente en la cola de Qt de forma asíncrona
+        QTimer.singleShot(800, _open_client_now)
+
+    btn_s.clicked.connect(open_server)
+    btn_c.clicked.connect(open_client)
+    btn_b.clicked.connect(open_both)
+
+    selector.show()
+    sys.exit(app.exec())
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Modos directos por línea de comandos
+# ─────────────────────────────────────────────────────────────────────────────
+
+def run_server_gui():
+    from PySide6.QtWidgets import QApplication
+    app = QApplication(sys.argv)
+    app.setStyle("Fusion")
+    win = ServerWindow()
+    win.show()
+    sys.exit(app.exec())
+
+
+def run_client_gui(host="127.0.0.1"):
+    from PySide6.QtWidgets import QApplication
+    from Frontend.main_client import MainClient
+    app = QApplication(sys.argv)
+    app.setStyle("Fusion")
+    win = MainClient(host=host, port=9090)
+    win.show()
+    sys.exit(app.exec())
+
+
+def run_both_gui():
+    from PySide6.QtWidgets import QApplication
+    from Frontend.main_client import MainClient
+    from PySide6.QtCore import QTimer
+
+    app = QApplication(sys.argv)
+    app.setStyle("Fusion")
+    app.setQuitOnLastWindowClosed(False)
+
+    # 1. Servidor
+    srv_win = ServerWindow()
+    app._srv_win = srv_win
+    srv_win.show()
+
+    # 2. Cliente diferido nativamente sin hilos intermedios rotos
+    def _open_client():
         win = MainClient(host="127.0.0.1", port=9090)
+        app._main_win = win
         win.show()
-        sys.exit(app.exec())
+
+    QTimer.singleShot(800, _open_client)
+
+    sys.exit(app.exec())
 
 
 # ─────────────────────────────────────────────────────────────────────────────

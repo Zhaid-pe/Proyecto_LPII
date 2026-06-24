@@ -1,5 +1,5 @@
 """
-login_view.py – Pantalla de autenticación (Login / Registro)
+login_view.py - Pantalla de autenticacion (Login / Registro)
 """
 
 from PySide6.QtWidgets import (
@@ -11,25 +11,21 @@ from PySide6.QtGui import QFont
 
 
 class LoginView(QWidget):
-    # Señales emitidas al controlador principal
-    login_requested = Signal(str, str)       # correo, password
-    register_requested = Signal(str, str, str)  # nombre, correo, password
+    login_requested    = Signal(str, str, str)   # ip, correo, password
+    register_requested = Signal(str, str, str, str)  # ip, nombre, correo, password
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._build_ui()
 
-    # ── UI ──────────────────────────────────────────────────────────────────────
-
     def _build_ui(self):
-        self.setWindowTitle("ZoomClone – Iniciar sesión")
-        self.setMinimumSize(480, 560)
+        self.setWindowTitle("ZoomClone")
+        self.setMinimumSize(480, 620)
 
         root = QVBoxLayout(self)
         root.setAlignment(Qt.AlignCenter)
         root.setContentsMargins(40, 40, 40, 40)
 
-        # Logo / título
         title = QLabel("ZoomClone")
         title.setAlignment(Qt.AlignCenter)
         title.setFont(QFont("Arial", 28, QFont.Bold))
@@ -38,12 +34,37 @@ class LoginView(QWidget):
 
         subtitle = QLabel("Prototipo de videollamadas")
         subtitle.setAlignment(Qt.AlignCenter)
-        subtitle.setStyleSheet("color: #888; margin-bottom: 20px;")
+        subtitle.setStyleSheet("color: #888; margin-bottom: 10px;")
         root.addWidget(subtitle)
 
-        # Tabs login / registro
+        # ── Campo IP del servidor ──────────────────────────────────────────────
+        ip_frame = QFrame()
+        ip_frame.setStyleSheet(
+            "background: #1a1a2e; border: 1px solid #2a2a50; border-radius: 8px; padding: 4px;"
+        )
+        ip_layout = QHBoxLayout(ip_frame)
+        ip_layout.setContentsMargins(10, 6, 10, 6)
+
+        ip_icon = QLabel("IP del servidor:")
+        ip_icon.setStyleSheet("color: #888; font-size: 12px; font-weight: bold;")
+
+        self.input_ip = QLineEdit()
+        self.input_ip.setPlaceholderText("Ej: 192.168.1.5  (o 127.0.0.1 si eres el host)")
+        self.input_ip.setText("127.0.0.1")
+        self.input_ip.setFixedHeight(34)
+        self.input_ip.setStyleSheet(
+            "background: #232336; border: 1px solid #333; border-radius: 6px;"
+            "padding: 4px 10px; color: #e0e0e0; font-size: 13px;"
+        )
+
+        ip_layout.addWidget(ip_icon)
+        ip_layout.addWidget(self.input_ip)
+        root.addWidget(ip_frame)
+        root.addSpacing(8)
+
+        # ── Tabs login / registro ──────────────────────────────────────────────
         tabs = QHBoxLayout()
-        self.btn_tab_login = QPushButton("Iniciar sesión")
+        self.btn_tab_login = QPushButton("Iniciar sesion")
         self.btn_tab_login.setCheckable(True)
         self.btn_tab_login.setChecked(True)
         self.btn_tab_register = QPushButton("Registrarse")
@@ -59,17 +80,14 @@ class LoginView(QWidget):
         tabs.addWidget(self.btn_tab_register)
         root.addLayout(tabs)
 
-        # Stacked widget
         self.stack = QStackedWidget()
         self.stack.addWidget(self._build_login_form())
         self.stack.addWidget(self._build_register_form())
         root.addWidget(self.stack)
 
-        # Conectar tabs
         self.btn_tab_login.clicked.connect(lambda: self._switch_tab(0))
         self.btn_tab_register.clicked.connect(lambda: self._switch_tab(1))
 
-        # Estilo general
         self.setStyleSheet("""
             QWidget { background-color: #12121f; color: #e0e0e0; font-family: Arial; }
             QLineEdit {
@@ -86,11 +104,11 @@ class LoginView(QWidget):
         layout.setSpacing(14)
 
         self.login_correo = QLineEdit()
-        self.login_correo.setPlaceholderText("Correo electrónico")
+        self.login_correo.setPlaceholderText("Correo electronico")
         self.login_correo.setFixedHeight(42)
 
         self.login_password = QLineEdit()
-        self.login_password.setPlaceholderText("Contraseña")
+        self.login_password.setPlaceholderText("Contrasena")
         self.login_password.setEchoMode(QLineEdit.Password)
         self.login_password.setFixedHeight(42)
 
@@ -107,7 +125,7 @@ class LoginView(QWidget):
 
         layout.addWidget(QLabel("Correo"))
         layout.addWidget(self.login_correo)
-        layout.addWidget(QLabel("Contraseña"))
+        layout.addWidget(QLabel("Contrasena"))
         layout.addWidget(self.login_password)
         layout.addSpacing(6)
         layout.addWidget(btn)
@@ -125,16 +143,16 @@ class LoginView(QWidget):
         self.reg_nombre.setFixedHeight(42)
 
         self.reg_correo = QLineEdit()
-        self.reg_correo.setPlaceholderText("Correo electrónico")
+        self.reg_correo.setPlaceholderText("Correo electronico")
         self.reg_correo.setFixedHeight(42)
 
         self.reg_password = QLineEdit()
-        self.reg_password.setPlaceholderText("Contraseña")
+        self.reg_password.setPlaceholderText("Contrasena")
         self.reg_password.setEchoMode(QLineEdit.Password)
         self.reg_password.setFixedHeight(42)
 
         self.reg_password2 = QLineEdit()
-        self.reg_password2.setPlaceholderText("Confirmar contraseña")
+        self.reg_password2.setPlaceholderText("Confirmar contrasena")
         self.reg_password2.setEchoMode(QLineEdit.Password)
         self.reg_password2.setFixedHeight(42)
 
@@ -149,7 +167,7 @@ class LoginView(QWidget):
         btn.clicked.connect(self._on_register)
 
         for lbl, wdg in [("Nombre", self.reg_nombre), ("Correo", self.reg_correo),
-                          ("Contraseña", self.reg_password), ("Confirmar contraseña", self.reg_password2)]:
+                          ("Contrasena", self.reg_password), ("Confirmar contrasena", self.reg_password2)]:
             layout.addWidget(QLabel(lbl))
             layout.addWidget(wdg)
         layout.addSpacing(6)
@@ -157,20 +175,21 @@ class LoginView(QWidget):
         layout.addStretch()
         return widget
 
-    # ── Slots ──────────────────────────────────────────────────────────────────
-
     def _switch_tab(self, index: int):
         self.stack.setCurrentIndex(index)
         self.btn_tab_login.setChecked(index == 0)
         self.btn_tab_register.setChecked(index == 1)
 
+    def get_ip(self) -> str:
+        return self.input_ip.text().strip() or "127.0.0.1"
+
     def _on_login(self):
         correo = self.login_correo.text().strip()
         pwd = self.login_password.text()
         if not correo or not pwd:
-            QMessageBox.warning(self, "Campos vacíos", "Por favor completa todos los campos.")
+            QMessageBox.warning(self, "Campos vacios", "Por favor completa todos los campos.")
             return
-        self.login_requested.emit(correo, pwd)
+        self.login_requested.emit(self.get_ip(), correo, pwd)
 
     def _on_register(self):
         nombre = self.reg_nombre.text().strip()
@@ -178,12 +197,12 @@ class LoginView(QWidget):
         pwd = self.reg_password.text()
         pwd2 = self.reg_password2.text()
         if not nombre or not correo or not pwd:
-            QMessageBox.warning(self, "Campos vacíos", "Por favor completa todos los campos.")
+            QMessageBox.warning(self, "Campos vacios", "Por favor completa todos los campos.")
             return
         if pwd != pwd2:
-            QMessageBox.warning(self, "Contraseñas distintas", "Las contraseñas no coinciden.")
+            QMessageBox.warning(self, "Contrasenas distintas", "Las contrasenas no coinciden.")
             return
-        self.register_requested.emit(nombre, correo, pwd)
+        self.register_requested.emit(self.get_ip(), nombre, correo, pwd)
 
     def show_error(self, mensaje: str):
         QMessageBox.critical(self, "Error", mensaje)

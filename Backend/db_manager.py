@@ -1,5 +1,5 @@
 """
-db_manager.py – Capa de acceso a datos (SQLite)
+db_manager.py  Capa de acceso a datos (SQLite)
 Todas las operaciones de BD pasan por este módulo.
 """
 

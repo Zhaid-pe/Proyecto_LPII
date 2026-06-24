@@ -1,5 +1,5 @@
 """
-socket_client.py – Conexión TCP al servidor.
+socket_client.py Conexión TCP al servidor.
 Recibe mensajes en un hilo secundario y los pone en una Queue
 para que la GUI los consuma de forma segura.
 """
@@ -105,11 +105,20 @@ class SocketClient:
         logging.info(f"Archivo enviado: {nombre} ({tamanio} bytes)")
 
     def send_camera_frame(self, frame_bytes: bytes):
-        """Envía un frame JPEG comprimido como base64."""
-        self.send({
+        import base64
+        import json
+        
+        # 1. Convertimos los bytes a texto Base64 seguro para JSON
+        frame_b64 = base64.b64encode(frame_bytes).decode("ascii")
+        
+        data = {
             "tipo": "CAMERA_FRAME",
-            "frame": base64.b64encode(frame_bytes).decode("ascii"),
-        })
+            "frame": frame_b64
+        }
+        
+        # 2. Convertimos a JSON y enviamos usando 'self.sock'
+        payload = (json.dumps(data) + "\n").encode("utf-8")
+        self.sock.sendall(payload)
 
     # ── Recepción ──────────────────────────────────────────────────────────────
 
