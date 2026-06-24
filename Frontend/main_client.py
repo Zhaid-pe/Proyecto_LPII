@@ -74,6 +74,7 @@ class MainClient(QMainWindow):
 
         self.room_view.send_chat.connect(self.client.chat_message)
         self.room_view.send_file.connect(self._do_send_file)
+        self.room_view.download_file.connect(self._do_request_file)
         self.room_view.leave_room.connect(self._do_leave)
         self.room_view.admit_user.connect(self.client.admit_user)
         self.room_view.reject_user.connect(self.client.reject_user)
@@ -179,7 +180,13 @@ class MainClient(QMainWindow):
             self.room_view.show_camera_frame(msg["frame"])
 
         elif tipo == "DISCONNECTED":
-            QMessageBox.critical(self, "Desconectado", "Se perdio la conexion con el servidor.")
+            # Si fue a propósito, no mostramos el error y reiniciamos la bandera
+            if getattr(self, '_cierre_intencional', False):
+                self._cierre_intencional = False
+            else:
+                # Si no fue a propósito, mostramos la alerta de caída real
+                QMessageBox.critical(self, "Desconectado", "Se perdio la conexion con el servidor.")
+            
             self._go(IDX_LOGIN)
 
         elif tipo == "ERROR":
@@ -230,6 +237,9 @@ class MainClient(QMainWindow):
 
     def _do_logout(self):
         self.usuario = None
+        # Avisamos al sistema que esta desconexión es a propósito
+        self._cierre_intencional = True 
+        
         self.client.disconnect()
         self._go(IDX_LOGIN)
 
@@ -241,6 +251,25 @@ class MainClient(QMainWindow):
     def _do_send_file(self, filepath: str):
         t = threading.Thread(target=self.client.send_file, args=(filepath,), daemon=True)
         t.start()
+    
+    def _do_request_file(self, nombre_archivo: str):
+        from PySide6.QtWidgets import QFileDialog
+        import os
+        import base64 # Asegúrate de que base64 esté importado arriba en tu archivo
+        
+        # Preguntar al usuario dónde guardar el archivo
+        ruta_guardado, _ = QFileDialog.getSaveFileName(
+            self, "Guardar archivo como", nombre_archivo
+        )
+        
+        if ruta_guardado:
+            # Guardamos la ruta temporalmente para usarla cuando el servidor responda
+            if not hasattr(self, '_archivos_pendientes'):
+                self._archivos_pendientes = {}
+            self._archivos_pendientes[nombre_archivo] = ruta_guardado
+            
+            # Avisamos al servidor que queremos este archivo
+            self.client.request_file(nombre_archivo)
 
     # ── Camara ────────────────────────────────────────────────────────────────────
 
@@ -364,3 +393,5 @@ class MainClient(QMainWindow):
         if hasattr(self, 'client') and self.client:
             self.client.disconnect()
         event.accept()
+        os._exit(0)
+

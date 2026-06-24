@@ -22,6 +22,7 @@ os.makedirs(DOWNLOADS_PATH, exist_ok=True)
 class RoomView(QWidget):
     send_chat     = Signal(str)
     send_file     = Signal(str)
+    download_file = Signal(str)
     leave_room    = Signal()
     admit_user    = Signal(int)
     reject_user   = Signal(int)
@@ -355,8 +356,37 @@ class RoomView(QWidget):
                 self.list_participants.takeItem(i)
                 break
 
-    def add_file(self, nombre: str, remitente: str):
-        self.list_files.addItem(f"  {nombre}  (por {remitente})")
+    def add_file(self, nombre_archivo: str, remitente: str):
+        item_widget = QWidget()
+        layout = QHBoxLayout(item_widget)
+        layout.setContentsMargins(8, 2, 8, 2)
+        
+        # Etiqueta con el nombre del archivo
+        lbl = QLabel(f"{nombre_archivo}  (por {remitente})")
+        lbl.setStyleSheet("color:#ccc; font-size:11px;")
+        
+        # Botón de descarga
+        btn_download = QPushButton("⬇️")
+        btn_download.setFixedSize(24, 24)
+        btn_download.setToolTip("Descargar archivo")
+        btn_download.setStyleSheet("""
+            QPushButton { background: #2D8CFF; color: white; border-radius: 4px; border: none; }
+            QPushButton:hover { background: #1a7ae0; }
+        """)
+        # Al hacer clic, emitimos el nombre del archivo
+        btn_download.clicked.connect(lambda: self.download_file.emit(nombre_archivo))
+        
+        layout.addWidget(lbl)
+        layout.addStretch()
+        layout.addWidget(btn_download)
+        
+        # Añadir a la lista
+        item = QListWidgetItem()
+        item.setSizeHint(item_widget.sizeHint())
+        self.list_files.addItem(item)
+        self.list_files.setItemWidget(item, item_widget)
+        
+        # Actualizar el contador del acordeón
         count = self.list_files.count()
         checked = self.files_header.isChecked()
         arrow = "^" if checked else "v"
