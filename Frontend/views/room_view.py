@@ -20,20 +20,55 @@ os.makedirs(DOWNLOADS_PATH, exist_ok=True)
 
 
 class RoomView(QWidget):
-    send_chat    = Signal(str)
-    send_file    = Signal(str)
-    leave_room   = Signal()
-    admit_user   = Signal(int)
-    reject_user  = Signal(int)
+    send_chat     = Signal(str)
+    send_file     = Signal(str)
+    leave_room    = Signal()
+    admit_user    = Signal(int)
+    reject_user   = Signal(int)
     camera_toggle = Signal(bool)
+    mic_toggle    = Signal(bool)  # Señal para el micrófono añadida
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.es_host = False
-        self.sala_info = {}
-        self.usuario = {}
-        self._camera_active = False
-        self._pending_requests = {}
+        
+        # Estados internos de los controles
+        self.camara_activa = False
+        self.mic_activo = False
+        self._pending_requests = {} # Inicialización interna para evitar errores en solicitudes
+
+        # Instanciar los nuevos botones redondos con emojis
+        self.btn_mic = QPushButton("🎙️")
+        self.btn_camera = QPushButton("📷")
+
+        # Ajustar fuente (tamaño del icono) y tamaño cuadrado de los botones
+        font = self.btn_camera.font()
+        font.setPointSize(16)
+        self.btn_mic.setFont(font)
+        self.btn_camera.setFont(font)
+
+        self.btn_mic.setFixedSize(50, 50)
+        self.btn_camera.setFixedSize(50, 50)
+
+        # Estilo Rojo (Apagado / Meet Style)
+        self.ESTILO_OFF = """
+            QPushButton { background-color: #ea4335; color: white; border-radius: 25px; border: none; }
+            QPushButton:hover { background-color: #d33426; }
+        """
+        # Estilo Gris (Prendido / Activo)
+        self.ESTILO_ON = """
+            QPushButton { background-color: #3c4043; color: white; border-radius: 25px; border: none; }
+            QPushButton:hover { background-color: #5f6368; }
+        """
+
+        # Aplicar estilos iniciales (Apagados por defecto)
+        self.btn_mic.setStyleSheet(self.ESTILO_OFF)
+        self.btn_camera.setStyleSheet(self.ESTILO_OFF)
+
+        # Conectar eventos de clic
+        self.btn_mic.clicked.connect(self._on_mic_clicked)
+        self.btn_camera.clicked.connect(self._on_camera_clicked)
+
+        # ¡CRUCIAL! Volver a llamar a la construcción de la interfaz completa
         self._build_ui()
 
     def setup(self, sala: dict, usuario: dict, es_host: bool):
@@ -154,12 +189,12 @@ class RoomView(QWidget):
         self.lbl_cam_remote.setStyleSheet("background:#0d0d1a; border-radius:8px; color:#444; font-size:12px;")
         self.lbl_cam_remote.setText("Sin participantes con camara activa")
 
+        # --- SE REEMPLAZÓ EL BOTÓN AZUL POR UNA FILA HORIZONTAL CENTRADA CON LOS DOS BOTONES ---
         ctrl = QHBoxLayout()
-        self.btn_camera = QPushButton("Iniciar camara")
-        self.btn_camera.setObjectName("primary")
-        self.btn_camera.setFixedHeight(36)
-        self.btn_camera.clicked.connect(self._toggle_camera)
+        ctrl.addStretch()
+        ctrl.addWidget(self.btn_mic)
         ctrl.addWidget(self.btn_camera)
+        ctrl.addStretch()
 
         self.frame_requests = QFrame()
         self.frame_requests.setStyleSheet("background:#161625; border-radius:8px;")
@@ -177,7 +212,7 @@ class RoomView(QWidget):
         layout.addWidget(self.lbl_cam_local, alignment=Qt.AlignHCenter)
         layout.addWidget(lbl_remote)
         layout.addWidget(self.lbl_cam_remote)
-        layout.addLayout(ctrl)
+        layout.addLayout(ctrl)  # Se inyecta la nueva fila de controles Meet/Zoom
         layout.addWidget(self.frame_requests)
         layout.addStretch()
 
@@ -289,17 +324,9 @@ class RoomView(QWidget):
         if path:
             self.send_file.emit(path)
 
-    def _toggle_camera(self):
-        self._camera_active = not self._camera_active
-        if self._camera_active:
-            self.btn_camera.setText("Detener camara")
-        else:
-            self._reset_camera_ui()
-        self.camera_toggle.emit(self._camera_active)
-
     def _reset_camera_ui(self):
-        self._camera_active = False
-        self.btn_camera.setText("Iniciar camara")
+        self.camara_activa = False
+        self.btn_camera.setStyleSheet(self.ESTILO_OFF)
         self.lbl_cam_local.setPixmap(QPixmap())
         self.lbl_cam_local.setText("Camara desactivada")
 
@@ -400,11 +427,9 @@ class RoomView(QWidget):
         import base64
 
         try:
-            # Si la data llega como texto Base64, la decodificamos a bytes
             if isinstance(frame_data, str):
                 frame_data = base64.b64decode(frame_data)
 
-            # Cargar imagen mágicamente desde los bytes
             img = QImage()
             img.loadFromData(frame_data)
 
@@ -423,3 +448,25 @@ class RoomView(QWidget):
     def load_history(self, mensajes: list):
         for m in mensajes:
             self.append_chat(m["nombre"], m["texto"])
+
+    # ── Manejo de Clics de los Nuevos Botones ──────────────────────────────────────
+
+    def _on_camera_clicked(self):
+        self.camara_activa = not self.camara_activa
+        
+        if self.camara_activa:
+            self.btn_camera.setStyleSheet(self.ESTILO_ON)
+        else:
+            self._reset_camera_ui()
+            
+        self.camera_toggle.emit(self.camara_activa)
+
+    def _on_mic_clicked(self):
+        self.mic_activo = not self.mic_activo
+        
+        if self.mic_activo:
+            self.btn_mic.setStyleSheet(self.ESTILO_ON)
+        else:
+            self.btn_mic.setStyleSheet(self.ESTILO_OFF)
+            
+        self.mic_toggle.emit(self.mic_activo)

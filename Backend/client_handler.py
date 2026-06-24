@@ -6,7 +6,7 @@ Mensajes soportados (tipo):
   CREATE_ROOM, JOIN_ROOM_REQUEST,
   ADMIT_USER, REJECT_USER,
   CHAT_MESSAGE, FILE_CHUNK, FILE_META,
-  CAMERA_FRAME, LEAVE_ROOM
+  CAMERA_FRAME, AUDIO_FRAME, LEAVE_ROOM   # <--- NUEVO: AUDIO_FRAME añadido
 """
 
 import sys
@@ -87,6 +87,7 @@ class ClientHandler:
             "FILE_CHUNK":       self._handle_file_chunk,
             "FILE_END":         self._handle_file_end,
             "CAMERA_FRAME":     self._handle_camera_frame,
+            "AUDIO_FRAME":      self._handle_audio_frame,  # <--- NUEVO: Redirigir audio
             "LEAVE_ROOM":       self._handle_leave_room,
         }
         fn = handlers.get(tipo)
@@ -244,7 +245,7 @@ class ClientHandler:
         self._file_meta = None
         self._file_chunks = []
 
-    # ── Cámara ─────────────────────────────────────────────────────────────────
+    # ── Cámara y Audio ─────────────────────────────────────────────────────────
 
     def _handle_camera_frame(self, msg):
         if not self.usuario or not self.id_sala:
@@ -255,6 +256,17 @@ class ClientHandler:
             "id_usuario": self.usuario["id_usuario"],
             "nombre": self.usuario["nombre"],
             "frame": msg.get("frame"),   # base64 jpg
+        }, excluir=self)
+
+    # <--- NUEVO: Manejo del paquete de audio
+    def _handle_audio_frame(self, msg):
+        if not self.usuario or not self.id_sala:
+            return
+        # Reenvía el audio a los demás (exactamente igual que el video)
+        self.server.broadcast_sala(self.id_sala, {
+            "tipo": "AUDIO_FRAME",
+            "id_usuario": self.usuario["id_usuario"],
+            "audio": msg.get("audio"),   # Audio comprimido/codificado en base64
         }, excluir=self)
 
     # ── Desconexión ────────────────────────────────────────────────────────────
