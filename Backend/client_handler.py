@@ -1,12 +1,6 @@
 """
-client_handler.py  Procesa el protocolo JSON por cliente.
-
-Mensajes soportados (tipo):
-  LOGIN_REQUEST, REGISTER_REQUEST,
-  CREATE_ROOM, JOIN_ROOM_REQUEST,
-  ADMIT_USER, REJECT_USER,
-  CHAT_MESSAGE, FILE_CHUNK, FILE_META,
-  CAMERA_FRAME, AUDIO_FRAME, LEAVE_ROOM   # <--- NUEVO: AUDIO_FRAME añadido
+client_handler.py Procesa el protocolo multiplexado por cliente.
+Separa el flujo en canales de comandos (CMD), Video (VID) y Audio (AUD).
 """
 
 import sys
@@ -15,6 +9,7 @@ import json
 import base64
 import logging
 import threading
+import struct
 
 _ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if _ROOT not in sys.path:
@@ -40,43 +35,76 @@ class ClientHandler:
         self.id_sala: int | None = None
         self.es_host: bool = False
 
-        self._buffer = b""
         self._lock = threading.Lock()
 
         # Recepción de archivos en chunks
         self._file_meta: dict | None = None
         self._file_chunks: list[bytes] = []
 
-    # ── Loop de recepción ──────────────────────────────────────────────────────
+    # ── Loop de recepción Estructurado ─────────────────────────────────────────
+
+    def _recv_exact(self, n: int) -> bytes | None:
+        data = b""
+        while len(data) < n:
+            try:
+                packet = self.sock.recv(n - len(data))
+                if not packet:
+                    return None
+                data += packet
+            except OSError:
+                return None
+        return data
 
     def run(self):
         try:
             while True:
-                data = self.sock.recv(65536)
-                if not data:
+                # 1. Leer el Header (7 bytes)
+                header = self._recv_exact(7)
+                if not header:
                     break
-                self._buffer += data
-                messages, self._buffer = SocketServer.decode_stream(self._buffer)
-                for msg in messages:
+
+                tamanio, canal_bytes = struct.unpack("!I3s", header)
+                canal = canal_bytes.decode("utf-8").strip()
+
+                # 2. Leer el Payload exacto
+                payload = self._recv_exact(tamanio)
+                if payload is None:
+                    break
+
+                # 3. Separación de Canales en tiempo real
+                if canal == "CMD":
+                    msg = json.loads(payload.decode("utf-8"))
                     self._dispatch(msg)
+                elif canal == "VID":
+                    self._handle_raw_video(payload)
+                elif canal == "AUD":
+                    self._handle_raw_audio(payload)
+
         except (ConnectionResetError, BrokenPipeError, OSError):
             pass
         finally:
             self._on_disconnect()
 
-    def send(self, data: dict):
+    def send_raw_packet(self, canal: str, payload: bytes):
+        """Envía un paquete crudo directamente por un canal específico"""
         with self._lock:
             try:
-                self.sock.sendall(SocketServer.encode_msg(data))
+                header = struct.pack("!I3s", len(payload), canal.encode("utf-8")[:3])
+                self.sock.sendall(header + payload)
             except OSError:
                 pass
 
-    # ── Dispatcher ─────────────────────────────────────────────────────────────
+    def send(self, data: dict):
+        """Envía comandos JSON por el canal prioritario 'CMD'"""
+        raw = json.dumps(data, ensure_ascii=False).encode("utf-8")
+        self.send_raw_packet("CMD", raw)
+
+    # ── Dispatcher de Comandos (Canal 'CMD') ───────────────────────────────────
 
     def _dispatch(self, msg: dict):
         tipo = msg.get("tipo", "")
         handlers = {
-            "LOGIN_REQUEST":    self._handle_login,
+            "LOGIN_REQUEST":     self._handle_login,
             "REGISTER_REQUEST": self._handle_register,
             "CREATE_ROOM":      self._handle_create_room,
             "JOIN_ROOM_REQUEST":self._handle_join_room,
@@ -86,15 +114,13 @@ class ClientHandler:
             "FILE_META":        self._handle_file_meta,
             "FILE_CHUNK":       self._handle_file_chunk,
             "FILE_END":         self._handle_file_end,
-            "CAMERA_FRAME":     self._handle_camera_frame,
-            "AUDIO_FRAME":      self._handle_audio_frame,  # <--- NUEVO: Redirigir audio
             "LEAVE_ROOM":       self._handle_leave_room,
         }
         fn = handlers.get(tipo)
         if fn:
             fn(msg)
         else:
-            logging.warning(f"Mensaje desconocido: {tipo}")
+            logging.warning(f"Mensaje de comando desconocido: {tipo}")
 
     # ── Autenticación ──────────────────────────────────────────────────────────
 
@@ -141,7 +167,6 @@ class ClientHandler:
         self.es_host = False
         self.server.registrar_en_sala(self.id_sala, self)
 
-        # Notificar al host
         host_handler = self.server.get_host_handler(sala["id_sala"])
         if host_handler:
             host_handler.send({
@@ -160,12 +185,9 @@ class ClientHandler:
         id_target = msg.get("id_usuario")
         db.actualizar_estado_participante(self.id_sala, id_target, "admitido")
 
-        # Notificar al usuario admitido
         target = self._find_handler(id_target)
         if target:
-            sala_info = db.obtener_sala_por_codigo(
-                self._get_codigo_sala(self.id_sala)
-            )
+            sala_info = db.obtener_sala_por_codigo(self._get_codigo_sala(self.id_sala))
             target.es_host = False
             mensajes_previos = db.obtener_mensajes_sala(self.id_sala)
             target.send({
@@ -174,7 +196,6 @@ class ClientHandler:
                 "mensajes_previos": mensajes_previos,
             })
 
-        # Broadcast a todos: nuevo participante
         usuario = db.obtener_usuario_por_id(id_target)
         self.server.broadcast_sala(self.id_sala, {
             "tipo": "USER_JOINED",
@@ -234,7 +255,6 @@ class ClientHandler:
         )
         logging.info(f"Archivo guardado: {nombre} ({len(data_completa)} bytes)")
 
-        # Notificar a la sala
         self.server.broadcast_sala(self.id_sala, {
             "tipo": "FILE_AVAILABLE",
             "id_archivo": id_archivo,
@@ -245,29 +265,35 @@ class ClientHandler:
         self._file_meta = None
         self._file_chunks = []
 
-    # ── Cámara y Audio ─────────────────────────────────────────────────────────
+    # ── Redirección de Video y Audio Crudo (Ultra Rápido) ──────────────────────
 
-    def _handle_camera_frame(self, msg):
+    def _handle_raw_video(self, frame_bytes):
+        """Retransmite los bytes de video inyectando el ID de quién lo envió"""
         if not self.usuario or not self.id_sala:
             return
-        # Reenvía el frame a los demás (sin guardar en BD)
-        self.server.broadcast_sala(self.id_sala, {
-            "tipo": "CAMERA_FRAME",
-            "id_usuario": self.usuario["id_usuario"],
-            "nombre": self.usuario["nombre"],
-            "frame": msg.get("frame"),   # base64 jpg
-        }, excluir=self)
+        
+        # Preparamos un sub-header de 4 bytes para que el cliente sepa de quién es este video
+        user_id_bytes = self.usuario["id_usuario"].to_bytes(4, byteorder="big")
+        paquete_transmision = user_id_bytes + frame_bytes
 
-    # <--- NUEVO: Manejo del paquete de audio
-    def _handle_audio_frame(self, msg):
+        # Hacemos bypass manual por la sala en binario puro
+        with self.server.lock:
+            for handler in self.server.salas_activas.get(self.id_sala, []):
+                if handler != self:
+                    handler.send_raw_packet("VID", paquete_transmision)
+
+    def _handle_raw_audio(self, audio_bytes):
+        """Retransmite los bytes de audio inyectando el ID de quién lo envió"""
         if not self.usuario or not self.id_sala:
             return
-        # Reenvía el audio a los demás (exactamente igual que el video)
-        self.server.broadcast_sala(self.id_sala, {
-            "tipo": "AUDIO_FRAME",
-            "id_usuario": self.usuario["id_usuario"],
-            "audio": msg.get("audio"),   # Audio comprimido/codificado en base64
-        }, excluir=self)
+        
+        user_id_bytes = self.usuario["id_usuario"].to_bytes(4, byteorder="big")
+        paquete_transmision = user_id_bytes + audio_bytes
+
+        with self.server.lock:
+            for handler in self.server.salas_activas.get(self.id_sala, []):
+                if handler != self:
+                    handler.send_raw_packet("AUD", paquete_transmision)
 
     # ── Desconexión ────────────────────────────────────────────────────────────
 
@@ -300,7 +326,6 @@ class ClientHandler:
     # ── Helpers ────────────────────────────────────────────────────────────────
 
     def _find_handler(self, id_usuario: int):
-        """Busca el ClientHandler de un usuario en la misma sala."""
         with self.server.lock:
             for h in self.server.salas_activas.get(self.id_sala, []):
                 if h.usuario and h.usuario["id_usuario"] == id_usuario:
@@ -308,7 +333,7 @@ class ClientHandler:
         return None
 
     def _get_codigo_sala(self, id_sala: int) -> str:
-        import sqlite3, os
+        import sqlite3
         db_path = os.path.join(os.path.dirname(__file__), "..", "Database", "zoom_clone.db")
         conn = sqlite3.connect(db_path)
         row = conn.execute("SELECT codigo_sala FROM Salas WHERE id_sala=?", (id_sala,)).fetchone()

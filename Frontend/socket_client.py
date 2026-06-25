@@ -1,7 +1,6 @@
 """
-socket_client.py Conexión TCP al servidor.
-Recibe mensajes en un hilo secundario y los pone en una Queue
-para que la GUI los consuma de forma segura.
+socket_client.py Conexión TCP al servidor con separación de canales.
+Recibe paquetes mediante cabeceras fijas de 7 bytes [Largo(4B)][Canal(3B)].
 """
 
 import socket
@@ -11,6 +10,7 @@ import queue
 import base64
 import os
 import logging
+import struct
 
 logging.basicConfig(level=logging.INFO, format="[CLIENT] %(asctime)s - %(message)s")
 
@@ -26,7 +26,6 @@ class SocketClient:
         self.sock: socket.socket | None = None
         self.connected = False
         self.message_queue: queue.Queue = queue.Queue()
-        self._buffer = b""
         self._lock = threading.Lock()
 
     # ── Conexión ───────────────────────────────────────────────────────────────
@@ -38,7 +37,7 @@ class SocketClient:
             self.connected = True
             t = threading.Thread(target=self._receive_loop, daemon=True)
             t.start()
-            logging.info(f"Conectado al servidor {host}:{port}")
+            logging.info(f"Conectado al servidor {host}:{port} con canales multiplexados")
             return True
         except (ConnectionRefusedError, OSError) as e:
             logging.error(f"No se pudo conectar: {e}")
@@ -52,17 +51,24 @@ class SocketClient:
             except OSError:
                 pass
 
-    # ── Envío ──────────────────────────────────────────────────────────────────
+    # ── Envío Multiplexado (La Clave) ──────────────────────────────────────────
+
+    def send_packet(self, canal: str, payload: bytes):
+        """Envía datos anteponiendo un header fijo de 7 bytes: [Tamaño(4B)][Canal(3B)]"""
+        with self._lock:
+            if not self.connected or not self.sock:
+                return
+            try:
+                # '!I3s' = Big-endian, Entero de 4 bytes, String de 3 bytes
+                header = struct.pack("!I3s", len(payload), canal.encode("utf-8")[:3])
+                self.sock.sendall(header + payload)
+            except OSError as e:
+                logging.error(f"Error al enviar por canal {canal}: {e}")
 
     def send(self, data: dict):
-        with self._lock:
-            if not self.connected:
-                return
-            raw = json.dumps(data, ensure_ascii=False).encode("utf-8") + b"\n"
-            try:
-                self.sock.sendall(raw)
-            except OSError as e:
-                logging.error(f"Error al enviar: {e}")
+        """Mantiene compatibilidad con tus métodos existentes de comandos/chat"""
+        raw = json.dumps(data, ensure_ascii=False).encode("utf-8")
+        self.send_packet("CMD", raw)
 
     # ── Mensajes de alto nivel ─────────────────────────────────────────────────
 
@@ -91,7 +97,6 @@ class SocketClient:
         self.send({"tipo": "LEAVE_ROOM"})
 
     def send_file(self, filepath: str):
-        """Envía un archivo al servidor en chunks."""
         nombre = os.path.basename(filepath)
         tamanio = os.path.getsize(filepath)
         self.send({"tipo": "FILE_META", "nombre_archivo": nombre, "tamanio_bytes": tamanio})
@@ -105,41 +110,78 @@ class SocketClient:
         logging.info(f"Archivo enviado: {nombre} ({tamanio} bytes)")
 
     def send_camera_frame(self, frame_bytes: bytes):
-        import base64
-        import json
-        
-        # 1. Convertimos los bytes a texto Base64 seguro para JSON
-        frame_b64 = base64.b64encode(frame_bytes).decode("ascii")
-        
-        data = {
-            "tipo": "CAMERA_FRAME",
-            "frame": frame_b64
-        }
-        
-        # 2. Convertimos a JSON y enviamos usando 'self.sock'
-        payload = (json.dumps(data) + "\n").encode("utf-8")
-        self.sock.sendall(payload)
+        """CANAL VIDEO: Envía bytes binarios puros de la cámara instantáneamente"""
+        self.send_packet("VID", frame_bytes)
 
-    # ── Recepción ──────────────────────────────────────────────────────────────
+    def send_audio_frame(self, audio_bytes: bytes):
+        """CANAL AUDIO: Envía bytes binarios puros del micrófono sin latencia"""
+        self.send_packet("AUD", audio_bytes)
+
+    # ── Recepción Estructurada ─────────────────────────────────────────────────
+
+    def _recv_exact(self, n: int) -> bytes | None:
+        """Asegura la lectura exacta de N bytes del stream TCP"""
+        data = b""
+        while len(data) < n:
+            try:
+                packet = self.sock.recv(n - len(data))
+                if not packet:
+                    return None
+                data += packet
+            except OSError:
+                return None
+        return data
 
     def _receive_loop(self):
         while self.connected:
             try:
-                data = self.sock.recv(65536)
-                if not data:
+                # 1. Leer los 7 bytes de la cabecera fija
+                header = self._recv_exact(7)
+                if not header:
                     break
-                self._buffer += data
-                while b"\n" in self._buffer:
-                    line, self._buffer = self._buffer.split(b"\n", 1)
-                    line = line.strip()
-                    if line:
-                        try:
-                            msg = json.loads(line.decode("utf-8"))
-                            self.message_queue.put(msg)
-                        except json.JSONDecodeError:
-                            pass
-            except (ConnectionResetError, BrokenPipeError, OSError):
+
+                tamanio, canal_bytes = struct.unpack("!I3s", header)
+                canal = canal_bytes.decode("utf-8").strip()
+
+                # 2. Leer el cuerpo del paquete exacto
+                payload = self._recv_exact(tamanio)
+                if payload is None:
+                    break
+
+                # 3. Enrutamiento por canales seguros
+                if canal == "CMD":
+                    msg = json.loads(payload.decode("utf-8"))
+                    self.message_queue.put(msg)
+                    
+                elif canal == "VID":
+                    # El servidor nos manda: [4B UserID] + [Bytes del Frame]
+                    id_usuario = int.from_bytes(payload[:4], byteorder="big")
+                    frame_raw = payload[4:]
+                    # Lo codificamos a b64 al recibir solo si tu GUI vieja lo necesita así
+                    frame_b64 = base64.b64encode(frame_raw).decode("ascii")
+                    
+                    self.message_queue.put({
+                        "tipo": "CAMERA_FRAME",
+                        "id_usuario": id_usuario,
+                        "frame": frame_b64
+                    })
+                    
+                elif canal == "AUD":
+                    # El servidor nos manda: [4B UserID] + [Bytes de Audio]
+                    id_usuario = int.from_bytes(payload[:4], byteorder="big")
+                    audio_raw = payload[4:]
+                    audio_b64 = base64.b64encode(audio_raw).decode("ascii")
+                    
+                    self.message_queue.put({
+                        "tipo": "AUDIO_FRAME",
+                        "id_usuario": id_usuario,
+                        "audio": audio_b64
+                    })
+
+            except Exception as e:
+                logging.error(f"Error en loop de recepción: {e}")
                 break
+
         self.connected = False
         self.message_queue.put({"tipo": "DISCONNECTED"})
         logging.info("Desconectado del servidor.")

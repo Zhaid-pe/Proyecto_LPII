@@ -1,18 +1,16 @@
 """
-socket_server.py – Servidor TCP multihilo
+socket_server.py – Servidor TCP multihilo adaptado para multiplexación de canales.
 Escucha conexiones y delega cada cliente a client_handler.
 """
 
 import socket
 import threading
-import json
 import logging
 
 logging.basicConfig(level=logging.INFO, format="[SERVER] %(asctime)s - %(message)s")
 
 HOST = "0.0.0.0"
 PORT = 9090
-BUFFER_SIZE = 65536  # 64 KB por lectura
 
 
 class SocketServer:
@@ -36,7 +34,7 @@ class SocketServer:
         self.server_socket.bind((self.host, self.port))
         self.server_socket.listen(50)
         self.running = True
-        logging.info(f"Servidor escuchando en {self.host}:{self.port}")
+        logging.info(f"Servidor escuchando en {self.host}:{self.port} con soporte de canales multiplexados")
 
         while self.running:
             try:
@@ -71,7 +69,10 @@ class SocketServer:
                 ]
 
     def broadcast_sala(self, id_sala: int, mensaje: dict, excluir=None):
-        """Envía un mensaje JSON a todos los clientes admitidos de la sala."""
+        """
+        Envía un mensaje JSON a todos los clientes admitidos de la sala.
+        Hereda automáticamente el canal estructurado 'CMD' definido en ClientHandler.
+        """
         with self.lock:
             handlers = list(self.salas_activas.get(id_sala, []))
         for h in handlers:
@@ -85,24 +86,3 @@ class SocketServer:
                 if h.es_host:
                     return h
         return None
-
-    # ── Envío de mensajes ──────────────────────────────────────────────────────
-
-    @staticmethod
-    def encode_msg(data: dict) -> bytes:
-        raw = json.dumps(data, ensure_ascii=False)
-        return raw.encode("utf-8") + b"\n"
-
-    @staticmethod
-    def decode_stream(buffer: bytes):
-        """Extrae mensajes JSON completos de un buffer de bytes."""
-        messages = []
-        while b"\n" in buffer:
-            line, buffer = buffer.split(b"\n", 1)
-            line = line.strip()
-            if line:
-                try:
-                    messages.append(json.loads(line.decode("utf-8")))
-                except json.JSONDecodeError:
-                    pass
-        return messages, buffer
