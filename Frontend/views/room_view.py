@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QLineEdit, QTextEdit, QFrame,
     QListWidget, QListWidgetItem,
-    QFileDialog, QSplitter, QMessageBox
+    QFileDialog, QSplitter, QMessageBox,QGridLayout
 )
 from PySide6.QtCore import Qt, Signal, QTimer, QByteArray
 from PySide6.QtGui import QFont, QPixmap, QImage
@@ -36,6 +36,12 @@ class RoomView(QWidget):
         self.camara_activa = False
         self.mic_activo = False
         self._pending_requests = {} # Inicialización interna para evitar errores en solicitudes
+        self.video_feeds = {}
+
+        self.current_page = 1
+        self.max_per_page = 6
+        self.room_members = ["Tú"] 
+        self.member_widgets = {}
 
         # Instanciar los nuevos botones redondos con emojis
         self.btn_mic = QPushButton("🎙️")
@@ -128,6 +134,8 @@ class RoomView(QWidget):
         root.setSpacing(0)
 
         root.addWidget(self._build_topbar())
+        
+        # ❌ ELIMINA o comenta el self._render_current_page() que estaba aquí
 
         splitter = QSplitter(Qt.Horizontal)
         splitter.setHandleWidth(4)
@@ -137,6 +145,9 @@ class RoomView(QWidget):
         splitter.setSizes([560, 440])
 
         root.addWidget(splitter)
+
+        # ✅ PONLO AQUÍ AL FINAL:
+        self._render_current_page()
 
     def _build_topbar(self) -> QWidget:
         bar = QFrame()
@@ -172,55 +183,75 @@ class RoomView(QWidget):
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(10)
 
-        lbl_local = QLabel("TU CAMARA")
-        lbl_local.setStyleSheet("color:#555; font-size:10px; font-weight:bold;")
+        # --- 1. NUEVA ZONA DE VIDEO (MOSAICO DINÁMICO) ---
+        self.video_area_widget = QWidget()
+        self.video_area_widget.setStyleSheet("background-color: #111; border-radius: 8px;") 
+        self.video_grid = QGridLayout(self.video_area_widget)
+        self.video_grid.setSpacing(10)
+        self.video_grid.setContentsMargins(10, 10, 10, 10)
+        
+        # Agregamos el contenedor del mosaico al panel central y le damos stretch=1 
+        # para que ocupe todo el espacio sobrante.
+        layout.addWidget(self.video_area_widget, stretch=1)
 
-        self.lbl_cam_local = QLabel()
-        self.lbl_cam_local.setFixedSize(320, 240)
-        self.lbl_cam_local.setAlignment(Qt.AlignCenter)
-        self.lbl_cam_local.setStyleSheet("background:#0d0d1a; border-radius:8px; color:#444; font-size:12px;")
-        self.lbl_cam_local.setText("Camara desactivada")
+        # --- 1.5 CONTROLES DE PAGINACIÓN ---
+        self.pag_layout = QHBoxLayout()
+        self.btn_prev = QPushButton("<")
+        self.btn_next = QPushButton(">")
+        self.lbl_page = QLabel("1 / 1")
+        self.lbl_page.setAlignment(Qt.AlignCenter)
 
-        lbl_remote = QLabel("PARTICIPANTES")
-        lbl_remote.setStyleSheet("color:#555; font-size:10px; font-weight:bold;")
+        estilo_btn = "background: #3c4043; color: white; border-radius: 4px; padding: 4px;"
+        self.btn_prev.setStyleSheet(estilo_btn)
+        self.btn_next.setStyleSheet(estilo_btn)
+        self.btn_prev.setFixedSize(30, 30)
+        self.btn_next.setFixedSize(30, 30)
 
-        self.lbl_cam_remote = QLabel()
-        self.lbl_cam_remote.setMinimumSize(320, 240)
-        self.lbl_cam_remote.setAlignment(Qt.AlignCenter)
-        self.lbl_cam_remote.setStyleSheet("background:#0d0d1a; border-radius:8px; color:#444; font-size:12px;")
-        self.lbl_cam_remote.setText("Sin participantes con camara activa")
+        self.btn_prev.clicked.connect(self._prev_page)
+        self.btn_next.clicked.connect(self._next_page)
 
-        # --- SE REEMPLAZÓ EL BOTÓN AZUL POR UNA FILA HORIZONTAL CENTRADA CON LOS DOS BOTONES ---
+        self.pag_layout.addStretch()
+        self.pag_layout.addWidget(self.btn_prev)
+        self.pag_layout.addWidget(self.lbl_page)
+        self.pag_layout.addWidget(self.btn_next)
+        self.pag_layout.addStretch()
+
+        layout.addLayout(self.pag_layout)
+        
+        # --- 2. CONTROLES DE LA REUNIÓN (MIC / CAM) ---
         ctrl = QHBoxLayout()
         ctrl.addStretch()
         ctrl.addWidget(self.btn_mic)
         ctrl.addWidget(self.btn_camera)
         ctrl.addStretch()
+        
+        layout.addLayout(ctrl)
 
+        # --- 3. PANEL DE SOLICITUDES DE INGRESO (WAITING ROOM) ---
         self.frame_requests = QFrame()
         self.frame_requests.setStyleSheet("background:#161625; border-radius:8px;")
         req_layout = QVBoxLayout(self.frame_requests)
         req_layout.setContentsMargins(10, 8, 10, 8)
+        
         lbl_req = QLabel("Solicitudes de ingreso")
         lbl_req.setStyleSheet("font-weight:bold; color:#aaa; font-size:12px;")
         req_layout.addWidget(lbl_req)
+        
         self.list_requests = QListWidget()
         self.list_requests.setMaximumHeight(150)
         req_layout.addWidget(self.list_requests)
+        
         self.frame_requests.setVisible(False)
-
-        layout.addWidget(lbl_local)
-        layout.addWidget(self.lbl_cam_local, alignment=Qt.AlignHCenter)
-        layout.addWidget(lbl_remote)
-        layout.addWidget(self.lbl_cam_remote)
-        layout.addLayout(ctrl)  # Se inyecta la nueva fila de controles Meet/Zoom
         layout.addWidget(self.frame_requests)
-        layout.addStretch()
 
+        # --- 4. LISTA DE PARTICIPANTES ---
+        lbl_participantes = QLabel("Participantes")
+        lbl_participantes.setStyleSheet("font-weight:bold; color:#aaa; font-size:12px;")
+        layout.addWidget(lbl_participantes)
+        
         self.list_participants = QListWidget()
         self.list_participants.setMaximumHeight(120)
         self.list_participants.setStyleSheet("background:#0d0d1a; border-radius:6px; color:#aaa;")
-        layout.addWidget(QLabel("Participantes"))
         layout.addWidget(self.list_participants)
 
         return panel
@@ -326,10 +357,10 @@ class RoomView(QWidget):
             self.send_file.emit(path)
 
     def _reset_camera_ui(self):
-        self.camara_activa = False
-        self.btn_camera.setStyleSheet(self.ESTILO_OFF)
-        self.lbl_cam_local.setPixmap(QPixmap())
-        self.lbl_cam_local.setText("Camara desactivada")
+        """Apaga la interfaz de la cámara local eliminando tu cuadro del mosaico."""
+        # En lugar de borrar la imagen de un QLabel fijo, simplemente
+        # le decimos al mosaico que elimine la pantalla llamada "Tú"
+        self.remove_video_feed("Tú")
 
     # ── API publica ──────────────────────────────────────────────────────────────
 
@@ -349,12 +380,23 @@ class RoomView(QWidget):
 
     def add_participant(self, nombre: str):
         self.list_participants.addItem(f"  {nombre}")
+        # Agregarlo a la cuadrícula visual si no existe
+        if nombre not in self.room_members:
+            self.room_members.append(nombre)
+            self._render_current_page()
 
     def remove_participant(self, nombre: str):
         for i in range(self.list_participants.count()):
             if nombre in self.list_participants.item(i).text():
                 self.list_participants.takeItem(i)
                 break
+        # Quitarlo de la cuadrícula visual
+        if nombre in self.room_members:
+            self.room_members.remove(nombre)
+            if nombre in self.member_widgets:
+                widget = self.member_widgets.pop(nombre)
+                widget.deleteLater()
+            self._render_current_page()
 
     def add_file(self, nombre_archivo: str, remitente: str):
         item_widget = QWidget()
@@ -438,42 +480,98 @@ class RoomView(QWidget):
         self._remove_request_item(id_usuario)
         self.reject_user.emit(id_usuario)
 
-    def show_camera_frame(self, frame_b64: str):
-        raw = base64.b64decode(frame_b64)
-        img = QImage()
-        img.loadFromData(QByteArray(raw), "JPG")
-        if not img.isNull():
-            pixmap = QPixmap.fromImage(img).scaled(
-                self.lbl_cam_remote.width(),
-                self.lbl_cam_remote.height(),
-                Qt.KeepAspectRatio,
-                Qt.SmoothTransformation,
-            )
-            self.lbl_cam_remote.setPixmap(pixmap)
+    # ── Manejo de Video (Mosaico Paginado Zoom-Style) ───────────────────────────
 
-    def show_local_frame(self, frame_data):
-        from PySide6.QtGui import QImage, QPixmap
-        from PySide6.QtCore import Qt
-        import base64
+    def _get_or_create_widget(self, nombre: str):
+        """Crea una caja gris por defecto si la persona no tiene cámara encendida"""
+        if nombre not in self.member_widgets:
+            lbl = QLabel(nombre)
+            lbl.setStyleSheet("background: #222; color: #aaa; border: 1px solid #444; border-radius: 8px; font-size: 16px;")
+            lbl.setAlignment(Qt.AlignCenter)
+            self.member_widgets[nombre] = lbl
+        return self.member_widgets[nombre]
 
+    def _render_current_page(self):
+        """Actualiza la pantalla para mostrar solo a las personas de la página actual"""
+        
+        # --- ESCUDO DE SEGURIDAD ---
+        if not hasattr(self, 'lbl_page'):
+            return
+        # ---------------------------
+
+        total_pages = max(1, (len(self.room_members) + self.max_per_page - 1) // self.max_per_page)
+        if self.current_page > total_pages:
+            self.current_page = total_pages
+
+        self.lbl_page.setText(f"{self.current_page} / {total_pages}")
+        self.btn_prev.setEnabled(self.current_page > 1)
+        self.btn_next.setEnabled(self.current_page < total_pages)
+
+        # --- FORMA SEGURA DE LIMPIAR LA CUADRÍCULA ---
+        for i in reversed(range(self.video_grid.count())):
+            widget = self.video_grid.itemAt(i).widget()
+            if widget:
+                self.video_grid.removeWidget(widget)
+                widget.hide()  # Lo ocultamos en lugar de destruirlo
+
+        # Calcular quiénes tocan en esta página
+        start_idx = (self.current_page - 1) * self.max_per_page
+        end_idx = start_idx + self.max_per_page
+        visible_members = self.room_members[start_idx:end_idx]
+
+        # Pintarlos en la cuadrícula (2 columnas)
+        for idx, nombre in enumerate(visible_members):
+            widget = self._get_or_create_widget(nombre)
+            widget.show()  # Lo volvemos a hacer visible
+            row = idx // 2
+            col = idx % 2
+            self.video_grid.addWidget(widget, row, col)
+
+    def _prev_page(self):
+        if self.current_page > 1:
+            self.current_page -= 1
+            self._render_current_page()
+
+    def _next_page(self):
+        self.current_page += 1
+        self._render_current_page()
+
+    def show_camera_frame(self, frame_b64: str, nombre: str = "Remoto"):
+        """Recibe un frame remoto (base64) y lo manda al mosaico."""
         try:
-            if isinstance(frame_data, str):
-                frame_data = base64.b64decode(frame_data)
-
-            img = QImage()
-            img.loadFromData(frame_data)
-
-            if not img.isNull():
-                pixmap = QPixmap.fromImage(img).scaled(
-                    self.lbl_cam_local.width(),
-                    self.lbl_cam_local.height(),
-                    Qt.KeepAspectRatio,
-                    Qt.SmoothTransformation,
-                )
-                self.lbl_cam_local.setPixmap(pixmap)
-                
+            raw = base64.b64decode(frame_b64)
+            self._update_mosaic_frame(nombre, raw)
         except Exception as e:
-            print(f"DEBUG [UI]: Error al mostrar imagen local: {e}")
+            print(f"DEBUG [UI]: Error al mostrar imagen remota: {e}")
+
+    def show_local_frame(self, frame_bytes: bytes):
+        """Recibe el frame de tu cámara web local y lo pone en el mosaico."""
+        try:
+            self._update_mosaic_frame("Tú", frame_bytes)
+        except Exception as e:
+            print(f"DEBUG [UI]: Error al mostrar imagen local en mosaico: {e}")
+
+    def _update_mosaic_frame(self, nombre: str, frame_data: bytes):
+        """Pinta la imagen en la cuadrícula sobre su caja correspondiente."""
+        if nombre not in self.room_members:
+            self.room_members.append(nombre)
+            self._render_current_page()
+
+        lbl = self._get_or_create_widget(nombre)
+        img = QImage()
+        img.loadFromData(frame_data)
+        if not img.isNull():
+            w = max(lbl.width(), 320)
+            h = max(lbl.height(), 240)
+            pixmap = QPixmap.fromImage(img).scaled(w, h, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            lbl.setPixmap(pixmap)
+
+    def _reset_camera_ui(self):
+        """Cuando apagas tu cámara, vuelve a mostrar la caja gris con tu nombre"""
+        if "Tú" in self.member_widgets:
+            lbl = self.member_widgets["Tú"]
+            lbl.clear()
+            lbl.setText("Tú")
 
     def load_history(self, mensajes: list):
         for m in mensajes:
@@ -488,6 +586,7 @@ class RoomView(QWidget):
             self.btn_camera.setStyleSheet(self.ESTILO_ON)
         else:
             self._reset_camera_ui()
+            self.btn_camera.setStyleSheet(self.ESTILO_OFF) # <-- Faltaba esta línea
             
         self.camera_toggle.emit(self.camara_activa)
 
