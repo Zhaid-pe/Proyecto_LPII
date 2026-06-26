@@ -33,6 +33,7 @@ class MainClient(QMainWindow):
     # Declaramos la señal aquí afuera
     from PySide6.QtCore import Signal
     local_frame_ready = Signal(bytes)
+    transfer_progress = Signal(str, int, bool)
 
     def __init__(self, host="127.0.0.1", port=9090):
         super().__init__()
@@ -47,6 +48,8 @@ class MainClient(QMainWindow):
         self._port = port
         self._last_password = ""
         self._pending_join_code = None
+        self._archivos_pendientes = {}
+        self._descargas_en_progreso = {}
 
         # Vistas
         self.stack = QStackedWidget()
@@ -69,6 +72,9 @@ class MainClient(QMainWindow):
         self.dashboard_view.create_room_requested.connect(self._do_create_room)
         self.dashboard_view.join_room_requested.connect(self._do_join_room)
         self.dashboard_view.logout_requested.connect(self._do_logout)
+
+        self.transfer_progress.connect(self.room_view.update_progress)
+        self._archivos_sala_tamanio = {} # Memoria para saber cuánto pesan los archivos
 
         self.waiting_view.cancel_requested.connect(self._do_leave)
 
@@ -175,6 +181,8 @@ class MainClient(QMainWindow):
         elif tipo == "FILE_AVAILABLE":
             self.room_view.add_file(msg["nombre_archivo"], msg["remitente"])
             self.room_view.system_message(f"{msg['remitente']} compartio '{msg['nombre_archivo']}'")
+            # Guardamos el tamaño para saber cuánto nos falta cuando queramos descargarlo
+            self._archivos_sala_tamanio[msg["nombre_archivo"]] = msg.get("tamanio_bytes", 1)
 
         elif tipo == "CAMERA_FRAME":
             self.room_view.show_camera_frame(msg["frame"])
@@ -191,6 +199,34 @@ class MainClient(QMainWindow):
 
         elif tipo == "ERROR":
             QMessageBox.warning(self, "Error del servidor", msg.get("mensaje", ""))
+        
+        elif tipo == "DOWNLOAD_CHUNK":
+            nombre = msg.get("nombre_archivo")
+            if nombre in self._descargas_en_progreso:
+                chunk_bytes = base64.b64decode(msg["data"])
+                self._descargas_en_progreso[nombre] += chunk_bytes
+                
+                # --- NUEVO CÁLCULO DE PROGRESO DE DESCARGA ---
+                recibido = len(self._descargas_en_progreso[nombre])
+                total = self._archivos_sala_tamanio.get(nombre, recibido)
+                porcentaje = int((recibido / total) * 100) if total > 0 else 100
+                self.transfer_progress.emit(nombre, porcentaje, False)
+
+        elif tipo == "DOWNLOAD_END":
+            nombre = msg.get("nombre_archivo")
+            if nombre in self._archivos_pendientes and nombre in self._descargas_en_progreso:
+                ruta = self._archivos_pendientes[nombre]
+                data = self._descargas_en_progreso[nombre]
+                try:
+                    with open(ruta, "wb") as f:
+                        f.write(data)
+                    QMessageBox.information(self, "Descarga exitosa", f"Archivo guardado en:\n{ruta}")
+                except Exception as e:
+                    QMessageBox.warning(self, "Error", f"No se pudo guardar el archivo:\n{e}")
+                
+                # Limpiamos la memoria
+                del self._archivos_pendientes[nombre]
+                del self._descargas_en_progreso[nombre]
 
     # ── Acciones ─────────────────────────────────────────────────────────────────
 
@@ -249,26 +285,27 @@ class MainClient(QMainWindow):
         self._go(IDX_DASHBOARD)
 
     def _do_send_file(self, filepath: str):
-        t = threading.Thread(target=self.client.send_file, args=(filepath,), daemon=True)
+        # Función interna que calcula el porcentaje de subida
+        def _progress_cb(nombre, enviado, total):
+            porcentaje = int((enviado / total) * 100) if total > 0 else 100
+            self.transfer_progress.emit(nombre, porcentaje, True)
+            
+        t = threading.Thread(target=self.client.send_file, args=(filepath, _progress_cb), daemon=True)
         t.start()
     
     def _do_request_file(self, nombre_archivo: str):
         from PySide6.QtWidgets import QFileDialog
-        import os
-        import base64 # Asegúrate de que base64 esté importado arriba en tu archivo
         
-        # Preguntar al usuario dónde guardar el archivo
         ruta_guardado, _ = QFileDialog.getSaveFileName(
             self, "Guardar archivo como", nombre_archivo
         )
         
         if ruta_guardado:
-            # Guardamos la ruta temporalmente para usarla cuando el servidor responda
-            if not hasattr(self, '_archivos_pendientes'):
-                self._archivos_pendientes = {}
+            # Preparamos la memoria
             self._archivos_pendientes[nombre_archivo] = ruta_guardado
+            self._descargas_en_progreso[nombre_archivo] = b""
             
-            # Avisamos al servidor que queremos este archivo
+            # Pedimos al servidor
             self.client.request_file(nombre_archivo)
 
     # ── Camara ────────────────────────────────────────────────────────────────────
@@ -337,7 +374,7 @@ class MainClient(QMainWindow):
                     frame_small = cv2.resize(frame, (320, 240))
 
                     # 2. Compresión JPEG a bytes
-                    _, buf = cv2.imencode(".jpg", frame_small, [cv2.IMWRITE_JPEG_QUALITY, 80])
+                    _, buf = cv2.imencode(".jpg", frame_small, [cv2.IMWRITE_JPEG_QUALITY, 40])
                     frame_bytes = buf.tobytes()
 
                     # 3. Enviar a la UI local usando la Señal Segura

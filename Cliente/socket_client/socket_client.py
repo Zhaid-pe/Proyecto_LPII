@@ -96,18 +96,34 @@ class SocketClient:
     def leave_room(self):
         self.send({"tipo": "LEAVE_ROOM"})
 
-    def send_file(self, filepath: str):
+    def send_file(self, filepath: str, progress_callback=None): # <-- Añadimos el callback
         nombre = os.path.basename(filepath)
         tamanio = os.path.getsize(filepath)
         self.send({"tipo": "FILE_META", "nombre_archivo": nombre, "tamanio_bytes": tamanio})
+        
+        enviado = 0 # <-- Contador de bytes
         with open(filepath, "rb") as f:
             while True:
                 chunk = f.read(CHUNK_SIZE)
                 if not chunk:
                     break
                 self.send({"tipo": "FILE_CHUNK", "data": base64.b64encode(chunk).decode("ascii")})
+                
+                # --- NUEVA LÓGICA DE PROGRESO ---
+                enviado += len(chunk)
+                if progress_callback:
+                    progress_callback(nombre, enviado, tamanio)
+                # --------------------------------
+                    
         self.send({"tipo": "FILE_END"})
         logging.info(f"Archivo enviado: {nombre} ({tamanio} bytes)")
+
+    def request_file(self, nombre_archivo: str):
+        """Pide al servidor que nos envíe un archivo específico"""
+        self.send({
+            "tipo": "DOWNLOAD_FILE_REQUEST", 
+            "nombre_archivo": nombre_archivo
+        })
 
     def send_camera_frame(self, frame_bytes: bytes):
         """CANAL VIDEO: Envía bytes binarios puros de la cámara instantáneamente"""

@@ -10,7 +10,8 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QLineEdit, QTextEdit, QFrame,
     QListWidget, QListWidgetItem,
-    QFileDialog, QSplitter, QMessageBox,QGridLayout
+    QFileDialog, QSplitter, QMessageBox,QGridLayout,
+    QProgressBar
 )
 from PySide6.QtCore import Qt, Signal, QTimer, QByteArray
 from PySide6.QtGui import QFont, QPixmap, QImage
@@ -296,6 +297,32 @@ class RoomView(QWidget):
             "background:#0d0d1a; border:1px solid #2a2a40; border-radius:6px; color:#ccc; font-size:12px;"
         )
         layout.addWidget(self.list_files)
+
+        # --- BARRA DE PROGRESO (OCULTA POR DEFECTO) ---
+        self.progress_frame = QFrame()
+        self.progress_frame.setVisible(False)
+        prog_lay = QVBoxLayout(self.progress_frame)
+        prog_lay.setContentsMargins(0, 5, 0, 5)
+
+        self.lbl_progress = QLabel("Progreso...")
+        self.lbl_progress.setStyleSheet("color:#aaa; font-size:11px;")
+        
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setFixedHeight(8)
+        self.progress_bar.setTextVisible(False)
+        self.progress_bar.setStyleSheet("""
+            QProgressBar { border: 1px solid #333; border-radius: 4px; background: #222; }
+            QProgressBar::chunk { background: #2D8CFF; border-radius: 4px; }
+        """)
+
+        prog_lay.addWidget(self.lbl_progress)
+        prog_lay.addWidget(self.progress_bar)
+        
+        layout.addWidget(self.progress_frame) # Se añade encima de la caja de texto
+        # ----------------------------------------------
+
+        # Barra de entrada (Esto ya lo tienes)
+        input_row = QHBoxLayout()
 
         # Barra de entrada
         input_row = QHBoxLayout()
@@ -599,3 +626,13 @@ class RoomView(QWidget):
             self.btn_mic.setStyleSheet(self.ESTILO_OFF)
             
         self.mic_toggle.emit(self.mic_activo)
+
+    def update_progress(self, nombre: str, porcentaje: int, es_subida: bool):
+        self.progress_frame.setVisible(True)
+        accion = "Subiendo" if es_subida else "Descargando"
+        self.lbl_progress.setText(f"{accion}: {nombre} ({porcentaje}%)")
+        self.progress_bar.setValue(porcentaje)
+        
+        # Si llega a 100%, ocultamos la barra después de 2 segundos
+        if porcentaje >= 100:
+            QTimer.singleShot(2000, lambda: self.progress_frame.setVisible(False))

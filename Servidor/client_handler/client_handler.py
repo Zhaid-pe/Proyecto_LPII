@@ -115,6 +115,7 @@ class ClientHandler:
             "FILE_CHUNK":       self._handle_file_chunk,
             "FILE_END":         self._handle_file_end,
             "LEAVE_ROOM":       self._handle_leave_room,
+            "DOWNLOAD_FILE_REQUEST": self._handle_download_request,
         }
         fn = handlers.get(tipo)
         if fn:
@@ -311,15 +312,16 @@ class ClientHandler:
 
     def _cleanup_sala(self):
         if self.id_sala:
-            self.server.broadcast_sala(self.id_sala, {
-                "tipo": "USER_LEFT",
-                "id_usuario": self.usuario["id_usuario"] if self.usuario else None,
-                "nombre": self.usuario["nombre"] if self.usuario else "Desconocido",
-            }, excluir=self)
-            self.server.desregistrar_de_sala(self.id_sala, self)
             if self.es_host:
+                self.server.broadcast_sala(self.id_sala, {"tipo": "ROOM_CLOSED"}, excluir=self)
                 db.cerrar_sala(self.id_sala)
-                self.server.broadcast_sala(self.id_sala, {"tipo": "ROOM_CLOSED"})
+            else:
+                self.server.broadcast_sala(self.id_sala, {
+                    "tipo": "USER_LEFT",
+                    "id_usuario": self.usuario["id_usuario"] if self.usuario else None,
+                    "nombre": self.usuario["nombre"] if self.usuario else "Desconocido",
+                }, excluir=self)
+            self.server.desregistrar_de_sala(self.id_sala, self)
             self.id_sala = None
             self.es_host = False
 
@@ -339,3 +341,35 @@ class ClientHandler:
         row = conn.execute("SELECT codigo_sala FROM Salas WHERE id_sala=?", (id_sala,)).fetchone()
         conn.close()
         return row[0] if row else ""
+
+    def _handle_download_request(self, msg):
+        nombre_archivo = msg.get("nombre_archivo")
+        if not nombre_archivo or not self.id_sala: 
+            return
+            
+        ruta = os.path.join(STORAGE_PATH, f"{self.id_sala}_{nombre_archivo}")
+        
+        if not os.path.exists(ruta):
+            self.send({"tipo": "ERROR", "mensaje": f"El archivo {nombre_archivo} no existe en el servidor."})
+            return
+            
+        # Leer el archivo y enviarlo por el canal de comandos (CMD)
+        try:
+            with open(ruta, "rb") as f:
+                while True:
+                    chunk = f.read(32768) # 32 KB por chunk
+                    if not chunk: 
+                        break
+                    
+                    self.send({
+                        "tipo": "DOWNLOAD_CHUNK", 
+                        "nombre_archivo": nombre_archivo, 
+                        "data": base64.b64encode(chunk).decode("ascii")
+                    })
+                    
+            # Avisamos que terminó de enviar
+            self.send({"tipo": "DOWNLOAD_END", "nombre_archivo": nombre_archivo})
+            logging.info(f"Archivo enviado a cliente: {nombre_archivo}")
+            
+        except Exception as e:
+            self.send({"tipo": "ERROR", "mensaje": f"Error al enviar archivo: {e}"})
