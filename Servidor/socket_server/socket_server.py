@@ -27,7 +27,7 @@ class SocketServer:
     # ── Ciclo principal ────────────────────────────────────────────────────────
 
     def start(self):
-        from Backend.client_handler import ClientHandler  # import tardío para evitar circular
+        from client_handler.client_handler import ClientHandler  # import tardío para evitar circular
 
         self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)

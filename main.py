@@ -13,6 +13,16 @@ import os
 import threading
 import socket
 
+# 1. Rutas maestras
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(os.path.join(BASE_DIR, "Servidor"))
+sys.path.append(os.path.join(BASE_DIR, "Cliente"))
+
+# 2. Nuevos imports anidados
+from Servidor.socket_server.socket_server import SocketServer
+from Cliente.main_client.main_client import MainClient  # Asegúrate de que así se llame tu clase
+import Servidor.Database.manager.db_manager as db_manager
+
 ROOT = os.path.dirname(os.path.abspath(__file__))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
@@ -192,8 +202,8 @@ class ServerWindow:
         self._thread.start()
 
     def _run_server(self, host, port):
-        from Backend import db_manager
-        from Backend.socket_server import SocketServer
+        from Servidor.Database.manager import db_manager
+        from Servidor.socket_server.socket_server import SocketServer
         db_manager.init_db()
         self._server = SocketServer(host, port)
         self._log_queue.put("__READY__")
@@ -304,7 +314,7 @@ def launch_selector():
 
     def open_client():
         selector.hide()
-        from Frontend.main_client import MainClient
+        from Cliente.main_client import MainClient
         win = MainClient(host="127.0.0.1", port=9090)
         app._main_win = win
         win.show()
@@ -318,7 +328,7 @@ def launch_selector():
 
         # 2. Programamos de forma segura la inicialización del cliente en el hilo principal
         def _open_client_now():
-            from Frontend.main_client import MainClient
+            from Cliente.main_client.main_client import MainClient
             client_win = MainClient(host="127.0.0.1", port=9090)
             app._main_win = client_win
             client_win.show()
@@ -349,7 +359,7 @@ def run_server_gui():
 
 def run_client_gui(host="127.0.0.1"):
     from PySide6.QtWidgets import QApplication
-    from Frontend.main_client import MainClient
+    from Cliente.main_client import MainClient
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
     win = MainClient(host=host, port=9090)
@@ -359,7 +369,7 @@ def run_client_gui(host="127.0.0.1"):
 
 def run_both_gui():
     from PySide6.QtWidgets import QApplication
-    from Frontend.main_client import MainClient
+    from Cliente.main_client import MainClient
     from PySide6.QtCore import QTimer
 
     app = QApplication(sys.argv)

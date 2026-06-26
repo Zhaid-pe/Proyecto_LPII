@@ -15,8 +15,8 @@ _ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-from Backend import db_manager as db
-from Backend.socket_server import SocketServer
+from Servidor.Database.manager import db_manager as db
+from Servidor.socket_server.socket_server import SocketServer
 
 STORAGE_PATH = os.path.join(os.path.dirname(__file__), "files_storage")
 os.makedirs(STORAGE_PATH, exist_ok=True)

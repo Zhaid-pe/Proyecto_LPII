@@ -17,11 +17,11 @@ from PySide6.QtWidgets import QMainWindow, QStackedWidget, QMessageBox
 from PySide6.QtCore import QTimer, Signal
 from PySide6.QtGui import QImage  # Importación necesaria para el manejo nativo de frames
 
-from Frontend.socket_client import SocketClient
-from Frontend.views.login_view import LoginView
-from Frontend.views.dashboard_view import DashboardView
-from Frontend.views.waiting_view import WaitingView
-from Frontend.views.room_view import RoomView
+from socket_client.socket_client import SocketClient
+from views.login.login_view import LoginView
+from views.dashboard.dashboard_view import DashboardView
+from views.waiting.waiting_view import WaitingView
+from views.room.room_view import RoomView
 
 IDX_LOGIN     = 0
 IDX_DASHBOARD = 1
