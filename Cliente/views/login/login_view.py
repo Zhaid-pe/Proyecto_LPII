@@ -13,6 +13,7 @@ from PySide6.QtGui import QFont
 class LoginView(QWidget):
     login_requested    = Signal(str, str, str)   # ip, correo, password
     register_requested = Signal(str, str, str, str)  # ip, nombre, correo, password
+    back_requested     = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -24,7 +25,17 @@ class LoginView(QWidget):
 
         root = QVBoxLayout(self)
         root.setAlignment(Qt.AlignCenter)
-        root.setContentsMargins(40, 40, 40, 40)
+        root.setContentsMargins(40, 20, 40, 40)
+
+        # ── Botón Volver ──
+        self.btn_back = QPushButton("⬅ Volver")
+        self.btn_back.setStyleSheet("""
+            QPushButton { background: transparent; color: #888; font-weight: bold; border: none; font-size: 14px; text-align: left; }
+            QPushButton:hover { color: #fff; }
+        """)
+        self.btn_back.clicked.connect(self.back_requested.emit)
+        root.addWidget(self.btn_back, alignment=Qt.AlignLeft)
+        root.addStretch()
 
         title = QLabel("ZoomClone")
         title.setAlignment(Qt.AlignCenter)
@@ -84,6 +95,7 @@ class LoginView(QWidget):
         self.stack.addWidget(self._build_login_form())
         self.stack.addWidget(self._build_register_form())
         root.addWidget(self.stack)
+        root.addStretch()
 
         self.btn_tab_login.clicked.connect(lambda: self._switch_tab(0))
         self.btn_tab_register.clicked.connect(lambda: self._switch_tab(1))

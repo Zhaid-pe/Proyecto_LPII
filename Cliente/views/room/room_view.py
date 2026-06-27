@@ -27,6 +27,8 @@ class RoomView(QWidget):
     leave_room    = Signal()
     admit_user    = Signal(int)
     reject_user   = Signal(int)
+    kick_user_requested = Signal(int)
+    wait_user_requested = Signal(int)
     camera_toggle = Signal(bool)
     mic_toggle    = Signal(bool)  # Señal para el micrófono añadida
 
@@ -87,6 +89,19 @@ class RoomView(QWidget):
         codigo = sala.get("codigo_sala", "")
         self.lbl_titulo.setText(f"Reunion: {nombre_sala}")
         self.lbl_codigo.setText(f"Codigo: {codigo}")
+        
+        # Limpiar datos previos
+        self.list_participants.clear()
+        self.list_requests.clear()
+        self._pending_requests.clear()
+        self.chat_display.clear()
+        self.list_files.clear()
+        self.room_members.clear()
+        for w in self.member_widgets.values():
+            w.deleteLater()
+        self.member_widgets.clear()
+        self._render_current_page()
+        
         self._system_message(f"Conectado a '{nombre_sala}' - Codigo: {codigo}")
         if es_host:
             self._system_message("Eres el anfitrion. Los participantes veran una sala de espera.")
@@ -405,8 +420,38 @@ class RoomView(QWidget):
             f'<span style="color:#555;font-style:italic;">-- {texto} --</span>'
         )
 
-    def add_participant(self, nombre: str):
-        self.list_participants.addItem(f"  {nombre}")
+    def add_participant(self, id_usuario: int, nombre: str):
+        item_widget = QWidget()
+        row = QHBoxLayout(item_widget)
+        row.setContentsMargins(4, 2, 4, 2)
+        lbl = QLabel(f"  {nombre}")
+        lbl.setStyleSheet("color:#aaa;")
+        row.addWidget(lbl)
+        row.addStretch()
+
+        if self.es_host:
+            btn_wait = QPushButton("🕒")
+            btn_wait.setFixedSize(24, 24)
+            btn_wait.setToolTip("Enviar a sala de espera")
+            btn_wait.setStyleSheet("background: #f0ad4e; color: white; border-radius: 4px; border: none;")
+            btn_wait.clicked.connect(lambda: self.wait_user_requested.emit(id_usuario))
+            
+            btn_kick = QPushButton("❌")
+            btn_kick.setFixedSize(24, 24)
+            btn_kick.setToolTip("Expulsar")
+            btn_kick.setStyleSheet("background: #dc3545; color: white; border-radius: 4px; border: none;")
+            btn_kick.clicked.connect(lambda: self.kick_user_requested.emit(id_usuario))
+            
+            row.addWidget(btn_wait)
+            row.addWidget(btn_kick)
+
+        item = QListWidgetItem()
+        item.setSizeHint(item_widget.sizeHint())
+        item.setData(Qt.UserRole, id_usuario)
+        item.setData(Qt.UserRole + 1, nombre)
+        self.list_participants.addItem(item)
+        self.list_participants.setItemWidget(item, item_widget)
+
         # Agregarlo a la cuadrícula visual si no existe
         if nombre not in self.room_members:
             self.room_members.append(nombre)
@@ -414,7 +459,8 @@ class RoomView(QWidget):
 
     def remove_participant(self, nombre: str):
         for i in range(self.list_participants.count()):
-            if nombre in self.list_participants.item(i).text():
+            item = self.list_participants.item(i)
+            if item.data(Qt.UserRole + 1) == nombre or (item.text() and nombre in item.text()):
                 self.list_participants.takeItem(i)
                 break
         # Quitarlo de la cuadrícula visual
@@ -594,7 +640,7 @@ class RoomView(QWidget):
             lbl.setPixmap(pixmap)
 
     def _reset_camera_ui(self):
-        """Cuando apagas tu cámara, vuelve a mostrar la caja gris con tu nombre"""
+        """Cuando apagas tu cámara, vuelve a mostrar la caja con tu nombre"""
         if "Tú" in self.member_widgets:
             lbl = self.member_widgets["Tú"]
             lbl.clear()

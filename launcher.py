@@ -66,26 +66,53 @@ def launch_selector():
     hint.setAlignment(Qt.AlignCenter)
     lay.addWidget(hint)
 
+    def go_back(win):
+        if hasattr(win, 'win'):
+            win.win.hide()
+            win.win.deleteLater()
+        else:
+            win.hide()
+            win.deleteLater()
+        selector.show()
+
     def open_server():
         selector.hide()
-        win = ServerWindow()
+        win = ServerWindow(on_back=lambda: go_back(win))
         app._main_win = win
         win.show()
 
     def open_client():
         selector.hide()
-        win = MainClient(host="127.0.0.1", port=9090)
+        win = MainClient(host="127.0.0.1", port=9090, on_back=lambda: go_back(win))
         app._main_win = win
         win.show()
 
     def open_both():
         selector.hide()
-        srv_win = ServerWindow()
+
+        def _back_both():
+            if hasattr(app, '_srv_win') and app._srv_win:
+                app._srv_win.on_back = None
+                if hasattr(app._srv_win, 'win'):
+                    app._srv_win.win.hide()
+                    app._srv_win.win.deleteLater()
+                else:
+                    app._srv_win.hide()
+                    app._srv_win.deleteLater()
+                app._srv_win = None
+            if hasattr(app, '_main_win') and app._main_win:
+                app._main_win.on_back = None
+                app._main_win.hide()
+                app._main_win.deleteLater()
+                app._main_win = None
+            selector.show()
+
+        srv_win = ServerWindow(on_back=_back_both)
         app._srv_win = srv_win
         srv_win.show()
 
         def _open_client_now():
-            client_win = MainClient(host="127.0.0.1", port=9090)
+            client_win = MainClient(host="127.0.0.1", port=9090, on_back=_back_both)
             app._main_win = client_win
             client_win.show()
 

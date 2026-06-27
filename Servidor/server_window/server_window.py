@@ -45,12 +45,14 @@ class QueueHandler(logging.Handler):
         self.q.put(self.format(record))
 
 class ServerWindow:
-    def __init__(self, host="0.0.0.0", port=9090):
+    def __init__(self, host="0.0.0.0", port=9090, on_back=None):
+        self.on_back = on_back
         self._server = None
         self._log_queue = queue.Queue()
         self._port = port
 
-        logging.getLogger().addHandler(QueueHandler(self._log_queue))
+        self._log_handler = QueueHandler(self._log_queue)
+        logging.getLogger().addHandler(self._log_handler)
 
         self.win = QMainWindow()
         self.win.setWindowTitle("ZoomClone – Servidor")
@@ -58,6 +60,7 @@ class ServerWindow:
         self.win.setStyleSheet(
             "QMainWindow, QWidget { background:#12121f; color:#e0e0e0; font-family:Arial; }"
         )
+        self.win.closeEvent = self._close_event
 
         central = QWidget()
         self.win.setCentralWidget(central)
@@ -139,7 +142,18 @@ class ServerWindow:
         )
         lay.addWidget(self.log_area)
 
-        # ── Botón detener ──
+        # ── Botones Inferiores ──
+        row_botones = QHBoxLayout()
+        
+        self.btn_back = QPushButton("⬅ Volver")
+        self.btn_back.setFixedHeight(42)
+        self.btn_back.setStyleSheet("""
+            QPushButton { background:#6c757d; color:white; border-radius:8px;
+                          font-size:14px; font-weight:bold; }
+            QPushButton:hover { background:#5a6268; }
+        """)
+        self.btn_back.clicked.connect(self._go_back)
+
         self.btn_stop = QPushButton("⏹  Detener servidor")
         self.btn_stop.setFixedHeight(42)
         self.btn_stop.setEnabled(False)
@@ -150,9 +164,12 @@ class ServerWindow:
             QPushButton:disabled { background:#3a1a1f; color:#555; }
         """)
         self.btn_stop.clicked.connect(self._stop)
-        lay.addWidget(self.btn_stop)
+        
+        row_botones.addWidget(self.btn_back)
+        row_botones.addWidget(self.btn_stop)
+        lay.addLayout(row_botones)
 
-        self._timer = QTimer()
+        self._timer = QTimer(self.win)
         self._timer.timeout.connect(self._flush_log)
         self._timer.start(200)
 
@@ -193,6 +210,27 @@ class ServerWindow:
         self.lbl_estado.setStyleSheet("font-size:13px; color:#dc3545;")
         self.btn_stop.setEnabled(False)
         self._append_log("Servidor detenido por el usuario.")
+
+    def _cleanup(self):
+        self._stop()
+        if hasattr(self, '_log_handler'):
+            logging.getLogger().removeHandler(self._log_handler)
+        if hasattr(self, '_timer'):
+            self._timer.stop()
+
+    def _go_back(self):
+        self._is_going_back = True
+        self._cleanup()
+        if self.on_back:
+            self.on_back()
+        self.win.close()
+
+    def _close_event(self, event):
+        self._cleanup()
+        event.accept()
+        if not getattr(self, '_is_going_back', False):
+            import os
+            os._exit(0)
 
     def show(self):
         self.win.show()

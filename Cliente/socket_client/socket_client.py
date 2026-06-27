@@ -133,6 +133,13 @@ class SocketClient:
         """CANAL AUDIO: Envía bytes binarios puros del micrófono sin latencia"""
         self.send_packet("AUD", audio_bytes)
 
+    # ── Controles de Host ──────────────────────────────────────────────────────
+    def kick_user(self, id_usuario: int):
+        self.send({"tipo": "KICK_USER", "id_usuario": id_usuario})
+
+    def wait_user(self, id_usuario: int):
+        self.send({"tipo": "WAIT_USER", "id_usuario": id_usuario})
+
     # ── Recepción Estructurada ─────────────────────────────────────────────────
 
     def _recv_exact(self, n: int) -> bytes | None:
@@ -170,27 +177,29 @@ class SocketClient:
                     self.message_queue.put(msg)
                     
                 elif canal == "VID":
-                    # El servidor nos manda: [4B UserID] + [Bytes del Frame]
-                    id_usuario = int.from_bytes(payload[:4], byteorder="big")
-                    frame_raw = payload[4:]
+                    # El servidor nos manda: [15B Nombre] + [Bytes del Frame]
+                    nombre_bytes = payload[:15].rstrip(b"\0")
+                    nombre = nombre_bytes.decode("utf-8", errors="replace")
+                    frame_raw = payload[15:]
                     # Lo codificamos a b64 al recibir solo si tu GUI vieja lo necesita así
                     frame_b64 = base64.b64encode(frame_raw).decode("ascii")
                     
                     self.message_queue.put({
                         "tipo": "CAMERA_FRAME",
-                        "id_usuario": id_usuario,
+                        "remitente": nombre,
                         "frame": frame_b64
                     })
                     
                 elif canal == "AUD":
-                    # El servidor nos manda: [4B UserID] + [Bytes de Audio]
-                    id_usuario = int.from_bytes(payload[:4], byteorder="big")
-                    audio_raw = payload[4:]
+                    # El servidor nos manda: [15B Nombre] + [Bytes de Audio]
+                    nombre_bytes = payload[:15].rstrip(b"\0")
+                    nombre = nombre_bytes.decode("utf-8", errors="replace")
+                    audio_raw = payload[15:]
                     audio_b64 = base64.b64encode(audio_raw).decode("ascii")
                     
                     self.message_queue.put({
                         "tipo": "AUDIO_FRAME",
-                        "id_usuario": id_usuario,
+                        "remitente": nombre,
                         "audio": audio_b64
                     })
 

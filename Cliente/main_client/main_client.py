@@ -35,8 +35,9 @@ class MainClient(QMainWindow):
     local_frame_ready = Signal(bytes)
     transfer_progress = Signal(str, int, bool)
 
-    def __init__(self, host="127.0.0.1", port=9090):
+    def __init__(self, host="127.0.0.1", port=9090, on_back=None):
         super().__init__()
+        self.on_back = on_back
         self.setWindowTitle("ZoomClone")
         self.setMinimumSize(1100, 680)
 
@@ -68,6 +69,7 @@ class MainClient(QMainWindow):
         # Senales
         self.login_view.login_requested.connect(self._do_login)
         self.login_view.register_requested.connect(self._do_register)
+        self.login_view.back_requested.connect(self._go_back)
 
         self.dashboard_view.create_room_requested.connect(self._do_create_room)
         self.dashboard_view.join_room_requested.connect(self._do_join_room)
@@ -85,6 +87,9 @@ class MainClient(QMainWindow):
         self.room_view.admit_user.connect(self.client.admit_user)
         self.room_view.reject_user.connect(self.client.reject_user)
         self.room_view.camera_toggle.connect(self._toggle_camera)
+        
+        self.room_view.kick_user_requested.connect(self.client.kick_user)
+        self.room_view.wait_user_requested.connect(self.client.wait_user)
 
         # <--- Nuestra nueva señal, de forma segura al final de las conexiones
         self.local_frame_ready.connect(self.room_view.show_local_frame)
@@ -100,6 +105,15 @@ class MainClient(QMainWindow):
         self.stack.setCurrentIndex(index)
 
     # ── Poll mensajes ────────────────────────────────────────────────────────────
+
+    def _go_back(self):
+        if self.stack.currentIndex() == IDX_LOGIN:
+            self._is_going_back = True
+            if self.on_back:
+                self.on_back()
+            self.close()
+        else:
+            self._do_logout()
 
     def _poll_messages(self):
         while not self.client.message_queue.empty():
@@ -153,22 +167,29 @@ class MainClient(QMainWindow):
             mensajes = msg.get("mensajes_previos", [])
             if mensajes:
                 self.room_view.load_history(mensajes)
+            participantes = msg.get("participantes_previos", [])
+            for p in participantes:
+                self.room_view.add_participant(p.get("id_usuario", 0), p.get("nombre", "Desconocido"))
             self._go(IDX_ROOM)
 
         elif tipo == "REJECTED_FROM_ROOM":
             self._go(IDX_DASHBOARD)
             QMessageBox.information(self, "Acceso denegado", "El anfitrion no te admitio en la sala.")
 
+        elif tipo == "KICKED_FROM_ROOM":
+            self._go(IDX_DASHBOARD)
+            QMessageBox.warning(self, "Expulsado", "Has sido expulsado de la sala por el anfitrión.")
+
+        elif tipo == "SENT_TO_WAITING_ROOM":
+            self._go(IDX_WAITING)
+            QMessageBox.information(self, "Sala de espera", "El anfitrión te ha devuelto a la sala de espera.")
+
         elif tipo == "USER_WANTS_JOIN":
             self.room_view.show_join_request(msg["id_usuario"], msg["nombre"])
 
         elif tipo == "USER_JOINED":
-            self.room_view.add_participant(msg["nombre"])
+            self.room_view.add_participant(msg.get("id_usuario", 0), msg["nombre"])
             self.room_view.system_message(f"{msg['nombre']} se unio a la reunion")
-
-        elif tipo == "USER_LEFT":
-            self.room_view.remove_participant(msg.get("nombre", ""))
-            self.room_view.system_message(f"{msg.get('nombre', 'Alguien')} salio de la reunion")
 
         elif tipo == "ROOM_CLOSED":
             self._go(IDX_DASHBOARD)
@@ -185,7 +206,7 @@ class MainClient(QMainWindow):
             self._archivos_sala_tamanio[msg["nombre_archivo"]] = msg.get("tamanio_bytes", 1)
 
         elif tipo == "CAMERA_FRAME":
-            self.room_view.show_camera_frame(msg["frame"])
+            self.room_view.show_camera_frame(msg["frame"], msg.get("remitente", "Remoto"))
 
         elif tipo == "DISCONNECTED":
             # Si fue a propósito, no mostramos el error y reiniciamos la bandera
@@ -228,6 +249,27 @@ class MainClient(QMainWindow):
                 del self._archivos_pendientes[nombre]
                 del self._descargas_en_progreso[nombre]
 
+        elif tipo == "CAMERA_OFF":
+            quien_apago = msg.get("remitente")
+            
+            # Buscamos en el diccionario correcto de tu mosaico: member_widgets
+            if quien_apago in self.room_view.member_widgets:
+                label_remoto = self.room_view.member_widgets[quien_apago]
+                
+                # 1. Borramos el frame congelado
+                label_remoto.clear() 
+                
+                # 2. Volvemos a poner el nombre en el recuadro gris
+                label_remoto.setText(quien_apago)
+
+        elif tipo == "USER_LEFT":
+            nombre_usuario_que_salio = msg.get("nombre")
+            
+            # ¡Magia! Tu función remove_participant ya se encarga de destruir 
+            # el recuadro del mosaico, así que solo necesitamos esta línea:
+            if nombre_usuario_que_salio:
+                self.room_view.remove_participant(nombre_usuario_que_salio)
+
     # ── Acciones ─────────────────────────────────────────────────────────────────
 
     def _conectar_a(self, ip: str) -> bool:
@@ -262,14 +304,8 @@ class MainClient(QMainWindow):
     def _do_create_room(self, nombre_sala: str):
         self.client.create_room(nombre_sala)
 
-    def _do_join_room(self, ip: str, codigo: str):
-        if not self._conectar_a(ip):
-            return
-        if self._current_host != self.login_view.get_ip():
-            self._pending_join_code = codigo
-            self.client.login(self.usuario["correo"], self._last_password)
-        else:
-            self.client.join_room(codigo)
+    def _do_join_room(self, codigo: str):
+        self.client.join_room(codigo)
 
     def _do_logout(self):
         self.usuario = None
@@ -315,6 +351,17 @@ class MainClient(QMainWindow):
             self._start_camera()
         else:
             self._stop_camera()
+            self.room_view._reset_camera_ui()
+            
+            # --- CORRECCIÓN AQUÍ ---
+            # Sacamos tu nombre de manera segura
+            mi_nombre = self.usuario.get("nombre", "Usuario") 
+            
+            # Lo enviamos ya listo para que el servidor no haga ningún esfuerzo
+            self.client.send({
+                "tipo": "CAMERA_OFF", 
+                "remitente": mi_nombre
+            })
 
     def _start_camera(self):
         try:
@@ -430,5 +477,6 @@ class MainClient(QMainWindow):
         if hasattr(self, 'client') and self.client:
             self.client.disconnect()
         event.accept()
-        os._exit(0)
+        if not getattr(self, '_is_going_back', False):
+            os._exit(0)
 

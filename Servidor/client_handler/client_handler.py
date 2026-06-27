@@ -105,17 +105,20 @@ class ClientHandler:
         tipo = msg.get("tipo", "")
         handlers = {
             "LOGIN_REQUEST":     self._handle_login,
-            "REGISTER_REQUEST": self._handle_register,
-            "CREATE_ROOM":      self._handle_create_room,
-            "JOIN_ROOM_REQUEST":self._handle_join_room,
-            "ADMIT_USER":       self._handle_admit_user,
-            "REJECT_USER":      self._handle_reject_user,
-            "CHAT_MESSAGE":     self._handle_chat_message,
-            "FILE_META":        self._handle_file_meta,
-            "FILE_CHUNK":       self._handle_file_chunk,
-            "FILE_END":         self._handle_file_end,
-            "LEAVE_ROOM":       self._handle_leave_room,
+            "REGISTER_REQUEST":  self._handle_register,
+            "CREATE_ROOM":       self._handle_create_room,
+            "JOIN_ROOM_REQUEST": self._handle_join_room,
+            "ADMIT_USER":        self._handle_admit_user,
+            "REJECT_USER":       self._handle_reject_user,
+            "KICK_USER":         self._handle_kick_user,
+            "WAIT_USER":         self._handle_wait_user,
+            "CHAT_MESSAGE":      self._handle_chat_message,
+            "FILE_META":         self._handle_file_meta,
+            "FILE_CHUNK":        self._handle_file_chunk,
+            "FILE_END":          self._handle_file_end,
+            "LEAVE_ROOM":        self._handle_leave_room,
             "DOWNLOAD_FILE_REQUEST": self._handle_download_request,
+            "CAMERA_OFF":        self._handle_camera_off,
         }
         fn = handlers.get(tipo)
         if fn:
@@ -191,10 +194,13 @@ class ClientHandler:
             sala_info = db.obtener_sala_por_codigo(self._get_codigo_sala(self.id_sala))
             target.es_host = False
             mensajes_previos = db.obtener_mensajes_sala(self.id_sala)
+            participantes_previos = db.obtener_participantes_admitidos(self.id_sala)
+            
             target.send({
                 "tipo": "ADMITTED_TO_ROOM",
                 "sala": sala_info,
                 "mensajes_previos": mensajes_previos,
+                "participantes_previos": participantes_previos,
             })
 
         usuario = db.obtener_usuario_por_id(id_target)
@@ -213,6 +219,41 @@ class ClientHandler:
         if target:
             target.send({"tipo": "REJECTED_FROM_ROOM"})
             self.server.desregistrar_de_sala(self.id_sala, target)
+
+    def _handle_kick_user(self, msg):
+        if not self.es_host or not self.id_sala:
+            return
+        id_target = msg.get("id_usuario")
+        db.actualizar_estado_participante(self.id_sala, id_target, "expulsado")
+        target = self._find_handler(id_target)
+        if target:
+            target.send({"tipo": "KICKED_FROM_ROOM"})
+            self.server.desregistrar_de_sala(self.id_sala, target)
+            self.server.broadcast_sala(self.id_sala, {
+                "tipo": "USER_LEFT",
+                "nombre": target.usuario["nombre"] if target.usuario else "Desconocido"
+            })
+
+    def _handle_wait_user(self, msg):
+        if not self.es_host or not self.id_sala:
+            return
+        id_target = msg.get("id_usuario")
+        db.actualizar_estado_participante(self.id_sala, id_target, "pendiente")
+        target = self._find_handler(id_target)
+        if target:
+            target.send({"tipo": "SENT_TO_WAITING_ROOM"})
+            self.server.desregistrar_de_sala(self.id_sala, target)
+            self.server.broadcast_sala(self.id_sala, {
+                "tipo": "USER_LEFT",
+                "nombre": target.usuario["nombre"] if target.usuario else "Desconocido"
+            })
+            # Re-enviar la solicitud al host
+            self.send({
+                "tipo": "USER_WANTS_JOIN",
+                "id_usuario": target.usuario["id_usuario"],
+                "nombre": target.usuario["nombre"],
+                "correo": target.usuario["correo"],
+            })
 
     # ── Chat ───────────────────────────────────────────────────────────────────
 
@@ -273,9 +314,9 @@ class ClientHandler:
         if not self.usuario or not self.id_sala:
             return
         
-        # Preparamos un sub-header de 4 bytes para que el cliente sepa de quién es este video
-        user_id_bytes = self.usuario["id_usuario"].to_bytes(4, byteorder="big")
-        paquete_transmision = user_id_bytes + frame_bytes
+        # Preparamos un sub-header de 15 bytes para que el cliente sepa de quién es este video
+        user_name_bytes = self.usuario["nombre"][:15].encode("utf-8").ljust(15, b"\0")
+        paquete_transmision = user_name_bytes + frame_bytes
 
         # Hacemos bypass manual por la sala en binario puro
         with self.server.lock:
@@ -288,8 +329,8 @@ class ClientHandler:
         if not self.usuario or not self.id_sala:
             return
         
-        user_id_bytes = self.usuario["id_usuario"].to_bytes(4, byteorder="big")
-        paquete_transmision = user_id_bytes + audio_bytes
+        user_name_bytes = self.usuario["nombre"][:15].encode("utf-8").ljust(15, b"\0")
+        paquete_transmision = user_name_bytes + audio_bytes
 
         with self.server.lock:
             for handler in self.server.salas_activas.get(self.id_sala, []):
@@ -373,3 +414,8 @@ class ClientHandler:
             
         except Exception as e:
             self.send({"tipo": "ERROR", "mensaje": f"Error al enviar archivo: {e}"})
+
+    def _handle_camera_off(self, msg):
+        # Verificamos que el usuario esté en una sala y reenviamos el mensaje intacto
+        if hasattr(self, 'id_sala') and self.id_sala:
+            self.server.broadcast_sala(self.id_sala, msg, excluir=self)
