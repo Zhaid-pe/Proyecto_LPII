@@ -1,6 +1,6 @@
 """
 socket_server.py – Servidor TCP multihilo adaptado para multiplexación de canales.
-Escucha conexiones y delega cada cliente a client_handler.
+Escucha conexiones y delega cada cliente a client_router.
 """
 
 import socket
@@ -27,7 +27,7 @@ class SocketServer:
     # ── Ciclo principal ────────────────────────────────────────────────────────
 
     def start(self):
-        from client_handler.client_handler import ClientHandler  # import tardío para evitar circular
+        from Logic.client_router import ClientRouter  # import tardío para evitar circular
 
         self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -40,7 +40,7 @@ class SocketServer:
             try:
                 client_socket, addr = self.server_socket.accept()
                 logging.info(f"Nueva conexión desde {addr}")
-                handler = ClientHandler(client_socket, addr, self)
+                handler = ClientRouter(client_socket, addr, self)
                 t = threading.Thread(target=handler.run, daemon=True)
                 t.start()
             except OSError:
@@ -71,7 +71,7 @@ class SocketServer:
     def broadcast_sala(self, id_sala: int, mensaje: dict, excluir=None):
         """
         Envía un mensaje JSON a todos los clientes admitidos de la sala.
-        Hereda automáticamente el canal estructurado 'CMD' definido en ClientHandler.
+        Hereda automáticamente el canal estructurado 'CMD' definido en ClientRouter.
         """
         with self.lock:
             handlers = list(self.salas_activas.get(id_sala, []))

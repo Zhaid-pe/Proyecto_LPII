@@ -181,7 +181,7 @@ class ServerWindow:
     def _run_server(self, host, port):
         # Imports desde las rutas maestras que provee main.py
         from Database.manager import db_manager
-        from socket_server.socket_server import SocketServer
+        from Logic.network_server import SocketServer
         
         db_manager.init_db()
         self._server = SocketServer(host, port)

@@ -4,14 +4,14 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QFont
 
 # Importaciones de la Interfaz
-from Servidor.server_window.server_window import ServerWindow
-from Cliente.main_client.main_client import MainClient 
+from Servidor.UI.server_window import ServerWindow
+from Cliente.main import AppMediator
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Selector visual
 # ─────────────────────────────────────────────────────────────────────────────
 def launch_selector():
-    app = QApplication(sys.argv)
+    app = QApplication.instance() or QApplication(sys.argv)
     app.setStyle("Fusion")
     app.setApplicationName("ZoomClone")
     app.setQuitOnLastWindowClosed(False)
@@ -83,9 +83,13 @@ def launch_selector():
 
     def open_client():
         selector.hide()
-        win = MainClient(host="127.0.0.1", port=9090, on_back=lambda: go_back(win))
+        win = AppMediator()
+        win._current_host = "127.0.0.1"
+        win._port = 9090
+        win.on_back = lambda: go_back(win.window)
         app._main_win = win
-        win.show()
+        win.window.show()
+        win.message_router.start()
 
     def open_both():
         selector.hide()
@@ -102,8 +106,8 @@ def launch_selector():
                 app._srv_win = None
             if hasattr(app, '_main_win') and app._main_win:
                 app._main_win.on_back = None
-                app._main_win.hide()
-                app._main_win.deleteLater()
+                app._main_win.window.hide()
+                app._main_win.window.deleteLater()
                 app._main_win = None
             selector.show()
 
@@ -112,9 +116,13 @@ def launch_selector():
         srv_win.show()
 
         def _open_client_now():
-            client_win = MainClient(host="127.0.0.1", port=9090, on_back=_back_both)
+            client_win = AppMediator()
+            client_win._current_host = "127.0.0.1"
+            client_win._port = 9090
+            client_win.on_back = _back_both
             app._main_win = client_win
-            client_win.show()
+            client_win.window.show()
+            client_win.message_router.start()
 
         QTimer.singleShot(800, _open_client_now)
 
@@ -129,21 +137,23 @@ def launch_selector():
 # Modos directos por línea de comandos
 # ─────────────────────────────────────────────────────────────────────────────
 def run_server_gui():
-    app = QApplication(sys.argv)
+    app = QApplication.instance() or QApplication(sys.argv)
     app.setStyle("Fusion")
     win = ServerWindow()
     win.show()
     sys.exit(app.exec())
 
 def run_client_gui(host="127.0.0.1"):
-    app = QApplication(sys.argv)
+    app = QApplication.instance() or QApplication(sys.argv)
     app.setStyle("Fusion")
-    win = MainClient(host=host, port=9090)
-    win.show()
+    win = AppMediator()
+    win._current_host = host
+    win.window.show()
+    win.message_router.start()
     sys.exit(app.exec())
 
 def run_both_gui():
-    app = QApplication(sys.argv)
+    app = QApplication.instance() or QApplication(sys.argv)
     app.setStyle("Fusion")
     app.setQuitOnLastWindowClosed(False)
 
@@ -152,9 +162,11 @@ def run_both_gui():
     srv_win.show()
 
     def _open_client():
-        win = MainClient(host="127.0.0.1", port=9090)
+        win = AppMediator()
+        win._current_host = "127.0.0.1"
         app._main_win = win
-        win.show()
+        win.window.show()
+        win.message_router.start()
 
     QTimer.singleShot(800, _open_client)
     sys.exit(app.exec())
